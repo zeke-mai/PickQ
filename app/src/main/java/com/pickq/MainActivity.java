@@ -24,7 +24,8 @@ public class MainActivity extends Activity {
   String screen = "home";
   LinearLayout root, body, bar;
   FrameLayout stage;
-  TextView footer;
+  boolean downloading;
+  View neighborPreview;
   android.content.SharedPreferences prefs;
   String draft = "";
   LinearLayout questionCard;
@@ -90,6 +91,10 @@ public class MainActivity extends Activity {
     TextView t = new TextView(this);
     t.setText(s);
     t.setTextSize(size);
+    t.setLineSpacing(dp(3), 1.08f);
+    if (size >= 18)
+      t.setTypeface(
+          android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL));
     t.setTextColor(Color.rgb(32, 44, 67));
     t.setPadding(dp(12), dp(12), dp(12), dp(12));
     return t;
@@ -106,6 +111,20 @@ public class MainActivity extends Activity {
     Button b = new Button(this);
     b.setText(s);
     b.setAllCaps(false);
+    b.setTextSize(15);
+    b.setTextColor(0xff315cdb);
+    b.setMinWidth(dp(48));
+    b.setMinimumWidth(dp(48));
+    b.setMinHeight(dp(48));
+    b.setMinimumHeight(dp(48));
+    b.setPadding(dp(16), dp(10), dp(16), dp(10));
+    b.setBackground(
+        new android.graphics.drawable.RippleDrawable(
+            android.content.res.ColorStateList.valueOf(0x22315cdb), bg(0xffeaf0ff), null));
+    LinearLayout.LayoutParams layout = new LinearLayout.LayoutParams(-2, -2);
+    layout.setMargins(dp(3), dp(5), dp(3), dp(5));
+    b.setLayoutParams(layout);
+    b.setLayoutParams(new LinearLayout.LayoutParams(-2, -2));
     b.setOnClickListener(v -> r.run());
     return b;
   }
@@ -117,6 +136,8 @@ public class MainActivity extends Activity {
     root.setBackgroundColor(0xfff5f7fc);
     setContentView(root);
     bar = new LinearLayout(this);
+    bar.setGravity(Gravity.CENTER_VERTICAL);
+    bar.setPadding(0, dp(6), 0, dp(12));
     TextView t = label(title, 22);
     bar.addView(t, new LinearLayout.LayoutParams(0, -2, 1));
     root.addView(bar);
@@ -124,6 +145,8 @@ public class MainActivity extends Activity {
     body = new LinearLayout(this);
     body.setOrientation(LinearLayout.VERTICAL);
     scroll.setFillViewport(true);
+    scroll.setVerticalScrollBarEnabled(false);
+    scroll.setOverScrollMode(View.OVER_SCROLL_NEVER);
     scroll.addView(body);
     root.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
   }
@@ -131,12 +154,26 @@ public class MainActivity extends Activity {
   void card(String title, String sub, Runnable r) {
     LinearLayout c = new LinearLayout(this);
     c.setOrientation(LinearLayout.VERTICAL);
-    c.setBackground(bg(Color.WHITE));
+    GradientDrawable surface = bg(Color.WHITE);
+    surface.setStroke(dp(1), 0xffe4e9f3);
+    c.setBackground(
+        new android.graphics.drawable.RippleDrawable(
+            android.content.res.ColorStateList.valueOf(0x15315cdb), surface, null));
+    c.setPadding(dp(8), dp(10), dp(8), dp(10));
+    c.setElevation(dp(1));
     LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
     lp.setMargins(0, dp(6), 0, dp(6));
     c.setLayoutParams(lp);
-    c.addView(label(title, 18));
-    c.addView(label(sub, 13));
+    LinearLayout heading = new LinearLayout(this);
+    heading.setGravity(Gravity.CENTER_VERTICAL);
+    heading.addView(label(title, 18), new LinearLayout.LayoutParams(0, -2, 1));
+    TextView arrow = label("›", 24);
+    arrow.setTextColor(0xff8592b0);
+    heading.addView(arrow);
+    c.addView(heading);
+    TextView subtitle = label(sub, 13);
+    subtitle.setTextColor(0xff77849e);
+    c.addView(subtitle);
     c.setOnClickListener(v -> r.run());
     body.addView(c);
   }
@@ -154,7 +191,25 @@ public class MainActivity extends Activity {
               startActivityForResult(i, 1);
             }));
     bar.addView(button("⋮", () -> settings()));
-    body.addView(label("PICKQ  /  每天积累一点", 13));
+    LinearLayout hero = new LinearLayout(this);
+    hero.setOrientation(LinearLayout.VERTICAL);
+    hero.setPadding(dp(12), dp(12), dp(12), dp(16));
+    GradientDrawable gradient =
+        new GradientDrawable(
+            GradientDrawable.Orientation.TL_BR, new int[] {0xff315cdb, 0xff7188ed});
+    gradient.setCornerRadius(dp(24));
+    hero.setBackground(gradient);
+    TextView eyebrow = label("P I C K Q   /   专注每一次进步", 12);
+    eyebrow.setTextColor(0xffdce6ff);
+    hero.addView(eyebrow);
+    TextView greeting = label("把每一道题，变成积累。", 23);
+    greeting.setTextColor(Color.WHITE);
+    hero.addView(greeting);
+    TextView summary = label("已导入 " + banks.length() + " 个题库  ·  从今天开始练习", 13);
+    summary.setTextColor(0xffe1e9ff);
+    hero.addView(summary);
+    body.addView(hero);
+    body.addView(label("本地题库", 16));
     ArrayList<JSONObject> list = new ArrayList<>();
     for (int i = 0; i < banks.length(); i++) list.add(banks.optJSONObject(i));
     list.sort((a, b) -> Long.compare(b.optLong("visited"), a.optLong("visited")));
@@ -176,6 +231,14 @@ public class MainActivity extends Activity {
 
   protected void onActivityResult(int r, int c, Intent data) {
     super.onActivityResult(r, c, data);
+    if (r == 2) {
+      if (getPackageManager().canRequestPackageInstalls()) installUpdate();
+      return;
+    }
+    if (r == 3 && c == RESULT_OK && data != null) {
+      importUpdate(data.getData());
+      return;
+    }
     if (r != 1 || c != RESULT_OK || data == null) return;
     Uri uri = data.getData();
     toast("正在读取题库…");
@@ -247,7 +310,8 @@ public class MainActivity extends Activity {
   void bankPage() {
     screen = "bank";
     shell(bank.optString("name"));
-    bar.addView(button("‹ 返回主界面", () -> home()), 0);
+    bar.addView(button("‹", () -> home()), 0);
+    bar.getChildAt(0).setContentDescription("返回主界面");
     bar.addView(button("⋮", () -> settings()));
     card("顺序练习", "继续上次进度 · 即时解析", () -> start(false));
     card("模拟考试", "按题型抽题 · 交卷后查看答案", () -> examSetup());
@@ -341,9 +405,13 @@ public class MainActivity extends Activity {
                     : "已到最后一题"),
             16);
     stage.addView(behind);
+    neighborPreview = behind;
+    behind.setVisibility(View.INVISIBLE);
+    stage.setClipChildren(true);
     LinearLayout front = new LinearLayout(this);
     front.setOrientation(LinearLayout.VERTICAL);
     front.setBackground(bg(Color.WHITE));
+    front.setElevation(dp(1));
     front.setPadding(dp(8), dp(8), dp(8), dp(8));
     front.addView(label(q.optString("title"), 21));
     stage.addView(front, new FrameLayout.LayoutParams(-1, -2));
@@ -380,7 +448,9 @@ public class MainActivity extends Activity {
                   }
                 });
         b.setTag(k);
-        front.addView(b);
+        LinearLayout.LayoutParams optionLayout = new LinearLayout.LayoutParams(-1, -2);
+        optionLayout.setMargins(0, dp(5), 0, dp(5));
+        front.addView(b, optionLayout);
       }
       refreshOptions(front, q);
       if (multiple(q) && !review) {
@@ -577,10 +647,31 @@ public class MainActivity extends Activity {
         }
       }
       if (swiping) {
-        if (questionCard != null) questionCard.setTranslationX(dx);
+        boolean edge = (dx > 0 && index == 0) || (dx < 0 && index == questions.size() - 1);
+        if (neighborPreview != null)
+          neighborPreview.setVisibility(edge ? View.INVISIBLE : View.VISIBLE);
+        if (questionCard != null) {
+          questionCard.animate().cancel();
+          if (edge) {
+            questionCard.setTranslationX(0);
+            questionCard.setPivotX(dx > 0 ? 0 : questionCard.getWidth());
+            questionCard.setScaleX(
+                1f + Math.min(Math.abs(dx) / Math.max(1, getWidth()), 1f) * 0.045f);
+          } else {
+            questionCard.setScaleX(1f);
+            questionCard.setTranslationX(dx);
+          }
+        }
         if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
           swiping = false;
-          if (questionCard != null) questionCard.setTranslationX(0);
+          if (questionCard != null)
+            questionCard
+                .animate()
+                .translationX(0)
+                .scaleX(1f)
+                .setInterpolator(new android.view.animation.DecelerateInterpolator())
+                .setDuration(220);
+          if (edge) return true;
           if (action == MotionEvent.ACTION_UP && Math.abs(dx) > dp(70)) move(dx < 0 ? 1 : -1);
         }
         return true;
@@ -621,10 +712,7 @@ public class MainActivity extends Activity {
   }
 
   void move(int delta) {
-    if (index + delta < 0 || index + delta >= questions.size()) {
-      toast("已到边界");
-      return;
-    }
+    if (index + delta < 0 || index + delta >= questions.size()) return;
     if (exam && !review && !draft.isEmpty()) examAnswers.put(id(questions.get(index)), draft);
     index += delta;
     if (!exam) {
@@ -879,6 +967,16 @@ public class MainActivity extends Activity {
               prefs.edit().putString("repo", repo.getText().toString().trim()).apply();
               checkUpdate(true);
             }));
+    box.addView(
+        button(
+            "从本地 APK 更新",
+            () -> {
+              Intent choose =
+                  new Intent(Intent.ACTION_OPEN_DOCUMENT)
+                      .setType("application/vnd.android.package-archive");
+              choose.addCategory(Intent.CATEGORY_OPENABLE);
+              startActivityForResult(choose, 3);
+            }));
     new AlertDialog.Builder(this)
         .setTitle("总设置 · v" + BuildConfig.VERSION_NAME)
         .setView(box)
@@ -921,19 +1019,28 @@ public class MainActivity extends Activity {
                 JSONObject release = new JSONObject(out.toString("UTF-8"));
                 String tag = release.getString("tag_name").replaceFirst("^v", "");
                 if (newer(tag, BuildConfig.VERSION_NAME)) {
-                  String link = release.getString("html_url");
-                  if (!link.startsWith("https://github.com/" + repo + "/releases/"))
-                    throw new IOException("发布地址不匹配");
+                  JSONArray assets = release.optJSONArray("assets");
+                  String url = "";
+                  if (assets != null)
+                    for (int i = 0; i < assets.length(); i++) {
+                      JSONObject asset = assets.getJSONObject(i);
+                      if (asset.optString("name").endsWith(".apk")) {
+                        String candidate = asset.optString("browser_download_url");
+                        if (candidate.startsWith(
+                            "https://github.com/" + repo + "/releases/download/")) {
+                          url = candidate;
+                          break;
+                        }
+                      }
+                    }
+                  if (url.isEmpty()) throw new IOException("此版本暂无安装包");
+                  String download = url;
                   runOnUiThread(
                       () ->
                           new AlertDialog.Builder(this)
                               .setTitle("发现新版本 " + tag)
-                              .setMessage("打开 GitHub 发布页下载 APK，安装时保留本地题库。")
-                              .setPositiveButton(
-                                  "前往下载",
-                                  (d, w) ->
-                                      startActivity(
-                                          new Intent(Intent.ACTION_VIEW, Uri.parse(link))))
+                              .setMessage("在应用内下载更新，安装后保留题库和练习记录。")
+                              .setPositiveButton("下载并安装", (d, w) -> downloadUpdate(download))
                               .setNegativeButton("稍后", null)
                               .show());
                 } else if (user) runOnUiThread(() -> toast("当前已是最新版本"));
@@ -944,6 +1051,168 @@ public class MainActivity extends Activity {
               }
             })
         .start();
+  }
+
+  void importUpdate(Uri uri) {
+    if (downloading) {
+      toast("更新正在处理中");
+      return;
+    }
+    downloading = true;
+    toast("正在校验本地安装包…");
+    new Thread(
+            () -> {
+              File part = new File(getCacheDir(), "update.part");
+              try {
+                try (InputStream in = getContentResolver().openInputStream(uri);
+                    FileOutputStream out = new FileOutputStream(part)) {
+                  byte[] buffer = new byte[16384];
+                  long total = 0;
+                  int n;
+                  while ((n = in.read(buffer)) != -1) {
+                    total += n;
+                    if (total > 128 * 1024 * 1024) throw new IOException("安装包过大");
+                    out.write(buffer, 0, n);
+                  }
+                }
+                verifyUpdate(part);
+                if (!part.renameTo(new File(getCacheDir(), "update.apk")))
+                  throw new IOException("无法保存安装包");
+                runOnUiThread(
+                    () -> {
+                      downloading = false;
+                      installUpdate();
+                    });
+              } catch (Exception e) {
+                part.delete();
+                runOnUiThread(
+                    () -> {
+                      downloading = false;
+                      toast("无法更新：" + e.getMessage());
+                    });
+              }
+            })
+        .start();
+  }
+
+  void downloadUpdate(String url) {
+    if (downloading) {
+      toast("更新正在下载中");
+      return;
+    }
+    downloading = true;
+    ProgressDialog progress = new ProgressDialog(this);
+    progress.setTitle("正在下载更新");
+    progress.setMessage("正在连接…");
+    progress.setProgressStyle(ProgressDialog.STYLE_HORIZONTAL);
+    progress.setMax(100);
+    progress.setCancelable(false);
+    progress.show();
+    new Thread(
+            () -> {
+              java.net.HttpURLConnection connection = null;
+              File part = new File(getCacheDir(), "update.part"),
+                  apk = new File(getCacheDir(), "update.apk");
+              try {
+                connection = (java.net.HttpURLConnection) new java.net.URL(url).openConnection();
+                connection.setConnectTimeout(15000);
+                connection.setReadTimeout(30000);
+                connection.setRequestProperty("User-Agent", "PickQ");
+                if (connection.getResponseCode() != 200
+                    || !connection.getURL().getProtocol().equals("https"))
+                  throw new IOException("下载服务暂不可用");
+                long length = connection.getContentLengthLong();
+                if (length > 128 * 1024 * 1024) throw new IOException("安装包过大");
+                try (InputStream in = connection.getInputStream();
+                    FileOutputStream out = new FileOutputStream(part)) {
+                  byte[] bytes = new byte[16384];
+                  long total = 0;
+                  int count, last = -1;
+                  while ((count = in.read(bytes)) != -1) {
+                    total += count;
+                    if (total > 128 * 1024 * 1024) throw new IOException("安装包过大");
+                    out.write(bytes, 0, count);
+                    int percent = length > 0 ? (int) (100 * total / length) : 0;
+                    if (percent != last) {
+                      last = percent;
+                      runOnUiThread(
+                          () -> {
+                            progress.setMessage("下载后将校验安装包");
+                            progress.setProgress(percent);
+                          });
+                    }
+                  }
+                  if (length > 0 && total != length) throw new IOException("下载不完整，请重试");
+                }
+                verifyUpdate(part);
+                if (!part.renameTo(apk)) throw new IOException("无法保存安装包");
+                runOnUiThread(
+                    () -> {
+                      progress.dismiss();
+                      downloading = false;
+                      installUpdate();
+                    });
+              } catch (Exception e) {
+                part.delete();
+                runOnUiThread(
+                    () -> {
+                      progress.dismiss();
+                      downloading = false;
+                      toast("更新失败：" + e.getMessage());
+                    });
+              } finally {
+                if (connection != null) connection.disconnect();
+              }
+            })
+        .start();
+  }
+
+  void verifyUpdate(File apk) throws Exception {
+    android.content.pm.PackageManager pm = getPackageManager();
+    android.content.pm.PackageInfo incoming =
+        pm.getPackageArchiveInfo(apk.getPath(), android.content.pm.PackageManager.GET_SIGNATURES);
+    android.content.pm.PackageInfo current =
+        pm.getPackageInfo(getPackageName(), android.content.pm.PackageManager.GET_SIGNATURES);
+    if (incoming == null
+        || !getPackageName().equals(incoming.packageName)
+        || incoming.versionCode <= current.versionCode) throw new IOException("安装包版本或应用标识不匹配");
+    if (incoming.signatures == null
+        || current.signatures == null
+        || !new HashSet<>(Arrays.asList(incoming.signatures))
+            .equals(new HashSet<>(Arrays.asList(current.signatures))))
+      throw new IOException("安装包签名校验失败");
+  }
+
+  void installUpdate() {
+    try {
+      File apk = new File(getCacheDir(), "update.apk");
+      verifyUpdate(apk);
+      if (!getPackageManager().canRequestPackageInstalls()) {
+        new AlertDialog.Builder(this)
+            .setTitle("允许安装更新")
+            .setMessage("请在系统设置中允许 PickQ 安装应用，返回后继续安装。")
+            .setPositiveButton(
+                "前往设置",
+                (d, w) ->
+                    startActivityForResult(
+                        new Intent(
+                            android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                            Uri.parse("package:" + getPackageName())),
+                        2))
+            .setNegativeButton("稍后", null)
+            .show();
+        return;
+      }
+      Uri uri = Uri.parse("content://" + getPackageName() + ".updates/update.apk");
+      Intent install =
+          new Intent(Intent.ACTION_INSTALL_PACKAGE)
+              .setDataAndType(uri, "application/vnd.android.package-archive");
+      install.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+      install.setClipData(ClipData.newRawUri("PickQ 更新", uri));
+      startActivity(install);
+    } catch (Exception e) {
+      toast("无法安装：" + e.getMessage());
+    }
   }
 
   static boolean newer(String a, String b) {
