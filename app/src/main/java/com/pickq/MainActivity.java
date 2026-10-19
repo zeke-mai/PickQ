@@ -27,7 +27,9 @@ public class MainActivity extends Activity {
   TextView footer;
   android.content.SharedPreferences prefs;
   String draft = "";
-  float down;
+  LinearLayout questionCard;
+  TextView progressLabel;
+  LinearLayout resultBar;
 
   void put(JSONObject o, String k, Object v) {
     try {
@@ -118,9 +120,10 @@ public class MainActivity extends Activity {
     TextView t = label(title, 22);
     bar.addView(t, new LinearLayout.LayoutParams(0, -2, 1));
     root.addView(bar);
-    ScrollView scroll = new ScrollView(this);
+    ScrollView scroll = new SwipeScroll();
     body = new LinearLayout(this);
     body.setOrientation(LinearLayout.VERTICAL);
+    scroll.setFillViewport(true);
     scroll.addView(body);
     root.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
   }
@@ -244,7 +247,8 @@ public class MainActivity extends Activity {
   void bankPage() {
     screen = "bank";
     shell(bank.optString("name"));
-    bar.addView(button("返回", () -> home()));
+    bar.addView(button("‹ 返回主界面", () -> home()), 0);
+    bar.addView(button("⋮", () -> settings()));
     card("顺序练习", "继续上次进度 · 即时解析", () -> start(false));
     card("模拟考试", "按题型抽题 · 交卷后查看答案", () -> examSetup());
     card("错题集", "查看累计错题与错误次数", () -> wrongPage());
@@ -344,24 +348,7 @@ public class MainActivity extends Activity {
     front.addView(label(q.optString("title"), 21));
     stage.addView(front, new FrameLayout.LayoutParams(-1, -2));
     body.addView(stage);
-    front.setOnTouchListener(
-        (v, event) -> {
-          if (event.getAction() == MotionEvent.ACTION_DOWN) {
-            down = event.getX();
-            return true;
-          }
-          if (event.getAction() == MotionEvent.ACTION_MOVE) {
-            v.setTranslationX(event.getX() - down);
-            return true;
-          }
-          if (event.getAction() == MotionEvent.ACTION_UP) {
-            float dx = v.getTranslationX();
-            if (Math.abs(dx) > dp(70)) move(dx < 0 ? 1 : -1);
-            else v.animate().translationX(0).setDuration(160);
-            return true;
-          }
-          return true;
-        });
+    questionCard = front;
     if (choice(q)) {
       JSONObject opts = q.optJSONObject("options");
       List<String> keys = orders.get(id(q));
@@ -376,17 +363,40 @@ public class MainActivity extends Activity {
             button(
                 k + "  " + opts.optString(k),
                 () -> {
-                  if ((!exam || review) && !answer(q).isEmpty()) return;
-                  if (q.optString("type").contains("多选") || q.optString("type").contains("不定项")) {
+                  if (review || (!exam && !answer(q).isEmpty())) return;
+                  if (multiple(q)) {
                     draft = draft.contains(k) ? draft.replace(k, "") : draft + k;
                   } else draft = k;
-                  if (exam) examAnswers.put(id(q), draft);
-                  refreshOptions(front, q);
+                  if (exam) {
+                    examAnswers.put(id(q), draft);
+                    updateProgress();
+                  }
+                  if (!multiple(q) && !exam) {
+                    refreshOptions(front, q);
+                    submit(q);
+                  } else {
+                    refreshOptions(front, q);
+                    updateProgress();
+                  }
                 });
         b.setTag(k);
         front.addView(b);
       }
       refreshOptions(front, q);
+      if (multiple(q) && !review) {
+        front.addView(
+            button(
+                "全选",
+                () -> {
+                  if (!exam && !answer(q).isEmpty()) return;
+                  StringBuilder all = new StringBuilder();
+                  for (char k = 'A'; k <= 'H'; k++) if (opts.has("" + k)) all.append(k);
+                  draft = all.toString();
+                  if (exam) examAnswers.put(id(q), draft);
+                  refreshOptions(front, q);
+                  updateProgress();
+                }));
+      }
     } else {
       EditText e = new EditText(this);
       e.setHint(q.optString("type").equals("填空题") ? "多个空用 | 分隔" : "输入答案；排序题填写原选项字母顺序");
@@ -403,43 +413,32 @@ public class MainActivity extends Activity {
 
             public void onTextChanged(CharSequence s, int a, int before, int count) {
               draft = s.toString();
-              if (exam) examAnswers.put(id(q), draft);
+              if (exam) {
+                examAnswers.put(id(q), draft);
+                updateProgress();
+              }
             }
 
             public void afterTextChanged(android.text.Editable s) {}
           });
       front.addView(e);
     }
-    if (!review)
-      body.addView(
-          button(
-              exam ? "保存答案" : "提交答案",
-              () -> {
-                if (draft.trim().isEmpty()) {
-                  toast("请先作答");
-                  return;
-                }
-                if (exam) {
-                  examAnswers.put(id(q), draft);
-                  move(1);
-                } else if (manual(q)) {
-                  put(q, "response", draft);
-                  new AlertDialog.Builder(this)
-                      .setTitle("参考答案")
-                      .setMessage(q.optString("answer") + "\n" + q.optString("explanation"))
-                      .setPositiveButton("我答对了", (d, w) -> record(q, true))
-                      .setNegativeButton("我答错了", (d, w) -> record(q, false))
-                      .show();
-                } else if (answer(q).isEmpty()) record(q, correct(q, draft));
-              }));
+    if (!review && (!choice(q) || multiple(q)))
+      body.addView(button(exam ? "保存答案" : "提交答案", () -> submit(q)));
     if ((!exam && !answer(q).isEmpty()) || review)
       body.addView(
           label("参考答案：" + q.optString("answer") + "\n解析：" + q.optString("explanation"), 16));
-    LinearLayout nav = new LinearLayout(this);
-    nav.addView(button("← 上一题", () -> move(-1)));
-    nav.addView(button("下一题 →", () -> move(1)));
+    View divider = new View(this);
+    divider.setBackgroundColor(0xffcbd5e1);
+    root.addView(divider, new LinearLayout.LayoutParams(-1, dp(2)));
+    resultBar = new LinearLayout(this);
+    resultBar.setGravity(Gravity.CENTER_VERTICAL);
+    resultBar.setBackground(bg(Color.WHITE));
+    resultBar.setPadding(dp(8), dp(10), dp(8), dp(10));
+    root.addView(resultBar);
+    updateProgress();
     if (exam && !review)
-      nav.addView(
+      resultBar.addView(
           button(
               "交卷",
               () ->
@@ -448,26 +447,146 @@ public class MainActivity extends Activity {
                       .setPositiveButton("交卷", (d, w) -> finishExam())
                       .setNegativeButton("继续答题", null)
                       .show()));
-    root.addView(nav);
+  }
+
+  boolean multiple(JSONObject q) {
+    return q.optString("type").contains("多选") || q.optString("type").contains("不定项");
+  }
+
+  void submit(JSONObject q) {
+    if (draft.trim().isEmpty()) {
+      toast("请先作答");
+      return;
+    }
+    if (exam) {
+      examAnswers.put(id(q), draft);
+      updateProgress();
+    } else if (!answer(q).isEmpty()) return;
+    else if (manual(q)) {
+      new AlertDialog.Builder(this)
+          .setTitle("参考答案")
+          .setMessage(q.optString("answer") + "\n" + q.optString("explanation"))
+          .setPositiveButton("我答对了", (d, w) -> record(q, true))
+          .setNegativeButton("我答错了", (d, w) -> record(q, false))
+          .show();
+    } else record(q, correct(q, draft));
+  }
+
+  void updateProgress() {
+    if (resultBar == null || !screen.equals("practice")) return;
+    // Keep the exam submit button while updating the counters in place.
+    if (resultBar.getChildCount() >= 3) {
+      resultBar.removeViews(0, 3);
+    }
     int done = 0, right = 0;
     for (JSONObject x : questions) {
       if (!answer(x).isEmpty()) done++;
-      if (exam ? review && Boolean.TRUE.equals(x.opt("examRight")) : x.optBoolean("right")) right++;
+      if (exam ? review && x.optBoolean("examRight") : x.optBoolean("right")) right++;
     }
-    footer =
-        label(
-            exam && !review
-                ? "已答 " + done + " / " + questions.size()
-                : "✓ "
-                    + right
-                    + "   ✗ "
-                    + (done - right)
-                    + "    已做 "
-                    + done
-                    + " / "
-                    + questions.size(),
-            14);
-    root.addView(footer);
+    boolean hidden = exam && !review;
+    TextView yes = label("  " + (hidden ? "—" : right), 14);
+    yes.setCompoundDrawablesWithIntrinsicBounds(new ResultIcon(true), null, null, null);
+    yes.setTextColor(0xff16834a);
+    yes.setContentDescription(hidden ? "交卷后显示答对数量" : "答对 " + right + " 题");
+    TextView no = label("  " + (hidden ? "—" : (done - right)), 14);
+    no.setCompoundDrawablesWithIntrinsicBounds(new ResultIcon(false), null, null, null);
+    no.setTextColor(0xffd33443);
+    no.setContentDescription(hidden ? "交卷后显示答错数量" : "答错 " + (done - right) + " 题");
+    resultBar.addView(yes, 0);
+    resultBar.addView(no, 1);
+    progressLabel = label("已做 " + done + "/" + questions.size(), 14);
+    resultBar.addView(progressLabel, 2, new LinearLayout.LayoutParams(0, -2, 1));
+  }
+
+  final class ResultIcon extends android.graphics.drawable.Drawable {
+    final boolean ok;
+
+    ResultIcon(boolean value) {
+      ok = value;
+      setBounds(0, 0, dp(22), dp(22));
+    }
+
+    public int getIntrinsicWidth() {
+      return dp(22);
+    }
+
+    public int getIntrinsicHeight() {
+      return dp(22);
+    }
+
+    public void draw(android.graphics.Canvas canvas) {
+      android.graphics.Paint paint =
+          new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+      paint.setColor(ok ? 0xff16834a : 0xffd33443);
+      android.graphics.Rect bounds = getBounds();
+      canvas.save();
+      canvas.translate(bounds.left, bounds.top);
+      float unit = bounds.width() / 24f;
+      canvas.scale(unit, unit);
+      paint.setStyle(android.graphics.Paint.Style.STROKE);
+      paint.setStrokeWidth(2);
+      paint.setStrokeCap(android.graphics.Paint.Cap.ROUND);
+      canvas.drawCircle(12, 12, 10, paint);
+      if (ok) {
+        canvas.drawLine(7, 12, 10.5f, 15.5f, paint);
+        canvas.drawLine(10.5f, 15.5f, 17, 8.5f, paint);
+      } else {
+        canvas.drawLine(8, 8, 16, 16, paint);
+        canvas.drawLine(16, 8, 8, 16, paint);
+      }
+      canvas.restore();
+    }
+
+    public void setAlpha(int alpha) {}
+
+    public void setColorFilter(android.graphics.ColorFilter filter) {}
+
+    public int getOpacity() {
+      return android.graphics.PixelFormat.TRANSLUCENT;
+    }
+  }
+
+  final class SwipeScroll extends ScrollView {
+    float startX, startY;
+    boolean swiping, vertical;
+
+    SwipeScroll() {
+      super(MainActivity.this);
+    }
+
+    @Override
+    public boolean dispatchTouchEvent(MotionEvent event) {
+      if (!screen.equals("practice")) return super.dispatchTouchEvent(event);
+      int action = event.getActionMasked();
+      if (action == MotionEvent.ACTION_DOWN) {
+        startX = event.getX();
+        startY = event.getY();
+        swiping = false;
+        vertical = false;
+      }
+      float dx = event.getX() - startX, dy = event.getY() - startY;
+      int slop = ViewConfiguration.get(MainActivity.this).getScaledTouchSlop();
+      if (action == MotionEvent.ACTION_MOVE && !swiping && !vertical) {
+        if (Math.abs(dy) > slop && Math.abs(dy) > Math.abs(dx)) vertical = true;
+        if (Math.abs(dx) > slop && Math.abs(dx) > Math.abs(dy) * 1.3f) {
+          swiping = true;
+          MotionEvent cancel = MotionEvent.obtain(event);
+          cancel.setAction(MotionEvent.ACTION_CANCEL);
+          super.dispatchTouchEvent(cancel);
+          cancel.recycle();
+        }
+      }
+      if (swiping) {
+        if (questionCard != null) questionCard.setTranslationX(dx);
+        if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+          swiping = false;
+          if (questionCard != null) questionCard.setTranslationX(0);
+          if (action == MotionEvent.ACTION_UP && Math.abs(dx) > dp(70)) move(dx < 0 ? 1 : -1);
+        }
+        return true;
+      }
+      return super.dispatchTouchEvent(event);
+    }
   }
 
   void refreshOptions(LinearLayout front, JSONObject q) {
@@ -651,7 +770,9 @@ public class MainActivity extends Activity {
       score.setHint("每题分值");
       score.setText("1");
       score.setInputType(8194);
+      row.addView(label("题数", 14));
       row.addView(count, new LinearLayout.LayoutParams(0, -2, 1));
+      row.addView(label("分值", 14));
       row.addView(score, new LinearLayout.LayoutParams(0, -2, 1));
       box.addView(row);
       inputs.put(t, new EditText[] {count, score});
