@@ -209,24 +209,197 @@ public class MainActivity extends Activity {
     summary.setTextColor(0xffe1e9ff);
     hero.addView(summary);
     body.addView(hero);
-    body.addView(label("本地题库", 16));
+    body.addView(label("文件夹", 16));
+    body.addView(button("＋ 新建文件夹", () -> createFolder(null)));
+    for (String name : folderNames()) {
+      int count = 0;
+      for (JSONObject item : sortedBanks()) if (name.equals(item.optString("folder"))) count++;
+      card("▤  " + name, count + " 个题库", () -> folderPage(name));
+    }
+    body.addView(label("未分组题库", 16));
+    for (JSONObject item : sortedBanks()) if (item.optString("folder").isEmpty()) bankCard(item);
+    if (banks.length() == 0)
+      card("导入你的第一份题库", "点击右上角 ＋ 选择 Excel (.xlsx)", () -> toast("支持模板列名，非必要列可以省略"));
+    cloudCard();
+  }
+
+  ArrayList<JSONObject> sortedBanks() {
     ArrayList<JSONObject> list = new ArrayList<>();
     for (int i = 0; i < banks.length(); i++) list.add(banks.optJSONObject(i));
     list.sort((a, b) -> Long.compare(b.optLong("visited"), a.optLong("visited")));
-    for (JSONObject b : list)
-      card(
-          b.optString("name"),
-          b.optJSONArray("questions").length()
-              + " 题 · 导入于 "
-              + android.text.format.DateFormat.format("yyyy-MM-dd HH:mm", b.optLong("imported")),
-          () -> {
-            bank = b;
-            put(bank, "visited", System.currentTimeMillis());
-            save();
-            bankPage();
-          });
-    if (list.isEmpty())
-      card("导入你的第一份题库", "点击右上角 ＋ 选择 Excel (.xlsx)", () -> toast("支持模板列名，非必要列可以省略"));
+    return list;
+  }
+
+  void bankCard(JSONObject item) {
+    card(
+        item.optString("name"),
+        item.optJSONArray("questions").length()
+            + " 题 · 导入于 "
+            + android.text.format.DateFormat.format("yyyy-MM-dd HH:mm", item.optLong("imported")),
+        () -> {
+          bank = item;
+          put(bank, "visited", System.currentTimeMillis());
+          save();
+          bankPage();
+        });
+  }
+
+  List<String> folderNames() {
+    LinkedHashSet<String> names = new LinkedHashSet<>();
+    try {
+      JSONArray stored = new JSONArray(prefs.getString("folders", "[]"));
+      for (int i = 0; i < stored.length(); i++)
+        if (!stored.optString(i).isEmpty()) names.add(stored.optString(i));
+    } catch (JSONException ignored) {
+    }
+    for (JSONObject item : sortedBanks())
+      if (!item.optString("folder").isEmpty()) names.add(item.optString("folder"));
+    return new ArrayList<>(names);
+  }
+
+  void folderPage(String name) {
+    screen = "folder";
+    shell(name);
+    bar.addView(button("‹", () -> home()), 0);
+    bar.getChildAt(0).setContentDescription("返回主界面");
+    int count = 0;
+    for (JSONObject item : sortedBanks())
+      if (name.equals(item.optString("folder"))) {
+        bankCard(item);
+        count++;
+      }
+    if (count == 0) body.addView(label("文件夹还是空的，可在题库设置中将题库移入。", 15));
+  }
+
+  void createFolder(JSONObject toMove) {
+    EditText input = new EditText(this);
+    input.setSingleLine();
+    input.setHint("文件夹名字");
+    AlertDialog dialog =
+        new AlertDialog.Builder(this)
+            .setTitle("新建文件夹")
+            .setView(input)
+            .setPositiveButton("创建", null)
+            .setNegativeButton("取消", null)
+            .create();
+    dialog.setOnShowListener(
+        v ->
+            dialog
+                .getButton(AlertDialog.BUTTON_POSITIVE)
+                .setOnClickListener(
+                    w -> {
+                      String name = input.getText().toString().trim();
+                      if (name.isEmpty()) {
+                        input.setError("请输入文件夹名字");
+                        return;
+                      }
+                      if (name.length() > 60) {
+                        input.setError("名字最多 60 个字符");
+                        return;
+                      }
+                      List<String> names = folderNames();
+                      if (names.contains(name)) {
+                        input.setError("已存在同名文件夹");
+                        return;
+                      }
+                      names.add(name);
+                      prefs.edit().putString("folders", new JSONArray(names).toString()).apply();
+                      if (toMove != null) {
+                        put(toMove, "folder", name);
+                        save();
+                        bankPage();
+                      } else home();
+                      dialog.dismiss();
+                    }));
+    dialog.show();
+  }
+
+  void bankSettings() {
+    new AlertDialog.Builder(this)
+        .setTitle("题库设置")
+        .setItems(
+            new String[] {"编辑题库名字", "移动至文件夹"},
+            (d, which) -> {
+              if (which == 0) renameBank();
+              else moveBank();
+            })
+        .setNegativeButton("取消", null)
+        .show();
+  }
+
+  void renameBank() {
+    EditText input = new EditText(this);
+    input.setSingleLine();
+    input.setText(bank.optString("name"));
+    input.setSelectAllOnFocus(true);
+    AlertDialog dialog =
+        new AlertDialog.Builder(this)
+            .setTitle("编辑题库名字")
+            .setView(input)
+            .setPositiveButton("保存", null)
+            .setNegativeButton("取消", null)
+            .create();
+    dialog.setOnShowListener(
+        v ->
+            dialog
+                .getButton(AlertDialog.BUTTON_POSITIVE)
+                .setOnClickListener(
+                    w -> {
+                      String name = input.getText().toString().trim();
+                      if (name.isEmpty()) {
+                        input.setError("题库名字不能为空");
+                        return;
+                      }
+                      if (name.length() > 100) {
+                        input.setError("名字最多 100 个字符");
+                        return;
+                      }
+                      put(bank, "name", name);
+                      save();
+                      dialog.dismiss();
+                      bankPage();
+                    }));
+    dialog.show();
+  }
+
+  void moveBank() {
+    List<String> folders = folderNames();
+    ArrayList<String> choices = new ArrayList<>();
+    choices.add("未分组（主界面）");
+    for (String folder : folders) choices.add("▤  " + folder);
+    choices.add("＋ 新建文件夹并移入");
+    String current = bank.optString("folder");
+    int selected = current.isEmpty() ? 0 : folders.indexOf(current) + 1;
+    new AlertDialog.Builder(this)
+        .setTitle("移动至文件夹")
+        .setSingleChoiceItems(
+            choices.toArray(new String[0]),
+            selected,
+            (d, which) -> {
+              d.dismiss();
+              if (which == choices.size() - 1) {
+                createFolder(bank);
+                return;
+              }
+              put(bank, "folder", which == 0 ? "" : folders.get(which - 1));
+              save();
+              bankPage();
+            })
+        .setNegativeButton("取消", null)
+        .show();
+  }
+
+  void cloudCard() {
+    body.addView(label("云端题库", 16));
+    card(
+        "云端题库 · 即将开放",
+        "刷新同步与导入入口预留",
+        () ->
+            new AlertDialog.Builder(this)
+                .setTitle("云端题库")
+                .setMessage("此功能为预留，当前版本尚未接入云端服务。")
+                .setPositiveButton("刷新（暂不可用）", (d, w) -> toast("云端题库尚未开放"))
+                .show());
   }
 
   protected void onActivityResult(int r, int c, Intent data) {
@@ -312,19 +485,10 @@ public class MainActivity extends Activity {
     shell(bank.optString("name"));
     bar.addView(button("‹", () -> home()), 0);
     bar.getChildAt(0).setContentDescription("返回主界面");
-    bar.addView(button("⋮", () -> settings()));
+    bar.addView(button("⋮", () -> bankSettings()));
     card("顺序练习", "继续上次进度 · 即时解析", () -> start(false));
     card("模拟考试", "按题型抽题 · 交卷后查看答案", () -> examSetup());
     card("错题集", "查看累计错题与错误次数", () -> wrongPage());
-    card(
-        "云端题库 · 即将开放",
-        "刷新同步与导入入口预留",
-        () ->
-            new AlertDialog.Builder(this)
-                .setTitle("云端题库")
-                .setMessage("此功能为预留，当前版本尚未接入云端服务。")
-                .setPositiveButton("刷新（暂不可用）", (d, w) -> toast("云端题库尚未开放"))
-                .show());
   }
 
   void start(boolean wrong) {
@@ -1231,7 +1395,7 @@ public class MainActivity extends Activity {
   @Override
   public void onBackPressed() {
     if (screen.equals("home")) super.onBackPressed();
-    else if (screen.equals("bank")) home();
+    else if (screen.equals("bank") || screen.equals("folder")) home();
     else if (exam && !review && screen.equals("practice"))
       new AlertDialog.Builder(this)
           .setMessage("退出会放弃当前考试，确认退出？")
