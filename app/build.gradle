@@ -20,3 +20,19 @@ android {
 }
 
 dependencies { implementation "net.sourceforge.jexcelapi:jxl:2.6.12" }
+
+android {
+ testOptions {
+  unitTests.includeAndroidResources = true
+  unitTests.all {
+   systemProperty 'sun.net.client.defaultReadTimeout', '60000'
+   systemProperty 'sun.net.client.defaultConnectTimeout', '15000'
+   systemProperty 'robolectric.dependency.repo.url', 'https://repo.maven.apache.org/maven2'
+   jvmArgs '--add-opens=java.base/java.lang=ALL-UNNAMED', '--add-opens=java.base/java.util=ALL-UNNAMED', '--add-opens=java.base/java.io=ALL-UNNAMED'
+  }
+ }
+}
+dependencies {
+ testImplementation 'junit:junit:4.13.2'
+ testImplementation 'org.robolectric:robolectric:4.14.1'
+}

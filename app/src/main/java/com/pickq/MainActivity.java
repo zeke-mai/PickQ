@@ -23,12 +23,26 @@ public class MainActivity extends Activity {
   boolean exam = false, review = false;
   String screen = "home";
   LinearLayout root, body, bar;
-  FrameLayout stage;
   boolean downloading;
-  View neighborPreview;
+  FrameLayout practiceViewport;
+  TextView toolbarTitle;
+  final Map<Integer, PracticePage> practicePages = new HashMap<>();
+  final Map<String, String> pendingAnswers = new HashMap<>();
+  boolean turning, dragging;
+  int pageRevision;
+  boolean practiceExam, practiceReview;
+  JSONObject practiceBank;
+  final Handler ui = new Handler(Looper.getMainLooper());
+  final Object storageLock = new Object();
+  final java.util.concurrent.atomic.AtomicLong storageVersion =
+      new java.util.concurrent.atomic.AtomicLong();
+  final java.util.concurrent.ExecutorService storageWorker =
+      java.util.concurrent.Executors.newSingleThreadExecutor();
+  boolean pendingSave;
+
   android.content.SharedPreferences prefs;
   String draft = "";
-  LinearLayout questionCard;
+
   TextView progressLabel;
   LinearLayout resultBar;
 
@@ -62,23 +76,77 @@ public class MainActivity extends Activity {
     } catch (Exception e) {
       toast("题库读取失败：" + e.getMessage());
     }
+    boolean migrated = false;
+    for (int i = 0; i < banks.length(); i++)
+      if (!banks.optJSONObject(i).has("id")) {
+        put(banks.optJSONObject(i), "id", UUID.randomUUID().toString());
+        migrated = true;
+      }
+    if (migrated) save();
     home();
     checkUpdate(false);
   }
 
   boolean save() {
-    try {
-      File f = new File(getFilesDir(), "banks.tmp");
-      try (FileOutputStream out = new FileOutputStream(f)) {
-        out.write(banks.toString().getBytes("UTF-8"));
-        out.getFD().sync();
+    pendingSave = false;
+    ui.removeCallbacks(deferredSave);
+    return writeSnapshot(banks.toString(), storageVersion.incrementAndGet());
+  }
+
+  boolean writeSnapshot(String data, long version) {
+    synchronized (storageLock) {
+      if (version != storageVersion.get()) return true;
+      try {
+        File temp = new File(getFilesDir(), "banks.tmp");
+        try (FileOutputStream out = new FileOutputStream(temp)) {
+          out.write(data.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+          out.getFD().sync();
+        }
+        if (!temp.renameTo(new File(getFilesDir(), "banks.json"))) throw new IOException("替换存储失败");
+        return true;
+      } catch (Exception e) {
+        ui.post(() -> toast("保存失败：" + e.getMessage()));
+        return false;
       }
-      if (!f.renameTo(new File(getFilesDir(), "banks.json"))) throw new IOException("替换存储失败");
-      return true;
-    } catch (Exception e) {
-      toast("保存失败：" + e.getMessage());
-      return false;
     }
+  }
+
+  final Runnable deferredSave =
+      new Runnable() {
+        public void run() {
+          if (turning || dragging) {
+            ui.postDelayed(this, 350);
+            return;
+          }
+          // Snapshot JSON only while idle; the worker never reads mutable UI state.
+          pendingSave = false;
+          String snapshot = banks.toString();
+          long version = storageVersion.incrementAndGet();
+          storageWorker.execute(() -> writeSnapshot(snapshot, version));
+        }
+      };
+
+  void saveWhenIdle() {
+    pendingSave = true;
+    ui.removeCallbacks(deferredSave);
+    ui.postDelayed(deferredSave, 350);
+  }
+
+  @Override
+  protected void onPause() {
+    super.onPause();
+    if (pendingSave || screen.equals("practice")) save();
+  }
+
+  @Override
+  protected void onDestroy() {
+    screen = "closed";
+    pageRevision++;
+    practiceViewport = null;
+    practicePages.clear();
+    ui.removeCallbacksAndMessages(null);
+    storageWorker.shutdown();
+    super.onDestroy();
   }
 
   int dp(int n) {
@@ -132,6 +200,12 @@ public class MainActivity extends Activity {
   }
 
   void shell(String title) {
+    pageRevision++;
+    practiceViewport = null;
+    practicePages.clear();
+    turning = false;
+    dragging = false;
+    resultBar = null;
     root = new LinearLayout(this);
     root.setOrientation(LinearLayout.VERTICAL);
     root.setPadding(dp(12), dp(8), dp(12), dp(8));
@@ -141,6 +215,7 @@ public class MainActivity extends Activity {
     bar.setGravity(Gravity.CENTER_VERTICAL);
     bar.setPadding(0, dp(6), 0, dp(12));
     TextView t = label(title, 22);
+    toolbarTitle = t;
     bar.addView(t, new LinearLayout.LayoutParams(0, -2, 1));
     root.addView(bar);
     ScrollView scroll = new SwipeScroll();
@@ -271,6 +346,14 @@ public class MainActivity extends Activity {
     shell(name);
     bar.addView(button("‹", () -> home()), 0);
     bar.getChildAt(0).setContentDescription("返回主界面");
+    bar.addView(
+        button(
+            "⋮",
+            () ->
+                new AlertDialog.Builder(this)
+                    .setTitle("文件夹设置")
+                    .setItems(new String[] {"删除文件夹"}, (d, w) -> deleteFolder(name))
+                    .show()));
     int count = 0;
     for (JSONObject item : sortedBanks())
       if (name.equals(item.optString("folder"))) {
@@ -278,6 +361,35 @@ public class MainActivity extends Activity {
         count++;
       }
     if (count == 0) body.addView(label("文件夹还是空的，可在题库设置中将题库移入。", 15));
+  }
+
+  void deleteFolder(String name) {
+    int count = 0;
+    for (JSONObject item : sortedBanks()) if (name.equals(item.optString("folder"))) count++;
+    new AlertDialog.Builder(this)
+        .setTitle("删除文件夹")
+        .setMessage("确定删除“" + name + "”？其中 " + count + " 个题库将移回主界面的未分组题库，题目、练习进度和错题记录都会保留。")
+        .setNegativeButton("取消", null)
+        .setPositiveButton(
+            "删除",
+            (d, w) -> {
+              List<String> folders = folderNames();
+              folders.remove(name);
+              ArrayList<JSONObject> moved = new ArrayList<>();
+              for (JSONObject item : sortedBanks())
+                if (name.equals(item.optString("folder"))) {
+                  moved.add(item);
+                  put(item, "folder", "");
+                }
+              if (!save()) {
+                for (JSONObject item : moved) put(item, "folder", name);
+                return;
+              }
+              prefs.edit().putString("folders", new JSONArray(folders).toString()).apply();
+              home();
+              toast("文件夹已删除，题库已保留");
+            })
+        .show();
   }
 
   void createFolder(JSONObject toMove) {
@@ -500,6 +612,7 @@ public class MainActivity extends Activity {
                   qs.put(q);
                 }
                 JSONObject b = new JSONObject();
+                put(b, "id", UUID.randomUUID().toString());
                 put(b, "name", "新题库");
                 try (android.database.Cursor cur =
                     getContentResolver().query(uri, null, null, null, null)) {
@@ -551,7 +664,15 @@ public class MainActivity extends Activity {
     exam = false;
     review = false;
     orders.clear();
-    index = wrong ? 0 : Math.min(bank.optInt("position"), questions.size() - 1);
+    index =
+        wrong
+            ? 0
+            : Math.max(
+                0,
+                Math.min(
+                    prefs.getInt("position:" + bank.optString("id"), bank.optInt("position")),
+                    questions.size() - 1));
+    pendingAnswers.clear();
     practice();
   }
 
@@ -598,26 +719,87 @@ public class MainActivity extends Activity {
   }
 
   void practice() {
+    boolean reuse =
+        screen.equals("practice")
+            && practiceViewport != null
+            && practiceExam == exam
+            && practiceReview == review
+            && practiceBank == bank;
     screen = "practice";
-    JSONObject q = questions.get(index);
-    draft = answer(q);
-    shell((exam ? "模拟考试" : "顺序练习") + "  " + (index + 1) + "/" + questions.size());
-    bar.addView(button("⋮", () -> practiceMenu()));
+    if (!reuse) {
+      shell("");
+      bar.addView(button("⋮", () -> practiceMenu()));
+      root.removeViewAt(1);
+      practiceExam = exam;
+      practiceReview = review;
+      practiceBank = bank;
+      practiceViewport =
+          new FrameLayout(this) {
+            @Override
+            protected void onSizeChanged(int w, int h, int oldw, int oldh) {
+              super.onSizeChanged(w, h, oldw, oldh);
+              post(
+                  () -> {
+                    if (practiceViewport == this && !turning && !dragging) positionPages(0);
+                  });
+            }
+          };
+      practiceViewport.setClipChildren(true);
+      root.addView(practiceViewport, 1, new LinearLayout.LayoutParams(-1, 0, 1));
+      View divider = new View(this);
+      divider.setBackgroundColor(0xffcbd5e1);
+      root.addView(divider, new LinearLayout.LayoutParams(-1, dp(2)));
+      resultBar = new LinearLayout(this);
+      resultBar.setGravity(Gravity.CENTER_VERTICAL);
+      resultBar.setBackground(bg(Color.WHITE));
+      resultBar.setPadding(dp(8), dp(10), dp(8), dp(10));
+      root.addView(resultBar);
+      updateProgress();
+      if (exam && !review)
+        resultBar.addView(
+            button(
+                "交卷",
+                () ->
+                    new AlertDialog.Builder(this)
+                        .setMessage("确认交卷？未答题按零分计。")
+                        .setPositiveButton("交卷", (d, w) -> finishExam())
+                        .setNegativeButton("继续答题", null)
+                        .show()));
+    }
+    pageRevision++;
+    for (PracticePage page : practicePages.values()) {
+      page.view.animate().withEndAction(null).cancel();
+    }
+    practicePages.clear();
+    practiceViewport.removeAllViews();
+    turning = false;
+    dragging = false;
+    showPracticePage();
+    updateProgress();
+  }
+
+  final class PracticePage {
+    final SwipeScroll view;
+
+    PracticePage(SwipeScroll scroll) {
+      view = scroll;
+    }
+  }
+
+  PracticePage buildPracticePage(int pageIndex) {
+    JSONObject q = questions.get(pageIndex);
+    String previousDraft = draft;
+    draft = pendingAnswers.getOrDefault(id(q), answer(q));
+    SwipeScroll scroll = new SwipeScroll();
+    scroll.setFillViewport(true);
+    scroll.setVerticalScrollBarEnabled(false);
+    scroll.setOverScrollMode(View.OVER_SCROLL_NEVER);
+    LinearLayout body = new LinearLayout(this);
+    body.setOrientation(LinearLayout.VERTICAL);
+    scroll.addView(body);
     body.addView(label(q.optString("type") + " · " + q.optString("chapter"), 13));
-    stage = new FrameLayout(this);
+    FrameLayout stage = new FrameLayout(this);
     stage.setMinimumHeight(dp(320));
-    TextView behind =
-        label(
-            (index > 0 ? "← " + questions.get(index - 1).optString("title") : "已到第一题")
-                + "\n\n"
-                + (index + 1 < questions.size()
-                    ? questions.get(index + 1).optString("title") + " →"
-                    : "已到最后一题"),
-            16);
-    stage.addView(behind);
-    neighborPreview = behind;
-    behind.setVisibility(View.INVISIBLE);
-    stage.setClipChildren(true);
     LinearLayout front = new LinearLayout(this);
     front.setOrientation(LinearLayout.VERTICAL);
     front.setBackground(bg(Color.WHITE));
@@ -626,7 +808,6 @@ public class MainActivity extends Activity {
     front.addView(label(q.optString("title"), 21));
     stage.addView(front, new FrameLayout.LayoutParams(-1, -2));
     body.addView(stage);
-    questionCard = front;
     if (choice(q)) {
       JSONObject opts = q.optJSONObject("options");
       List<String> keys = orders.get(id(q));
@@ -645,6 +826,7 @@ public class MainActivity extends Activity {
                   if (multiple(q)) {
                     draft = draft.contains(k) ? draft.replace(k, "") : draft + k;
                   } else draft = k;
+                  pendingAnswers.put(id(q), draft);
                   if (exam) {
                     examAnswers.put(id(q), draft);
                     updateProgress();
@@ -672,6 +854,7 @@ public class MainActivity extends Activity {
                   StringBuilder all = new StringBuilder();
                   for (char k = 'A'; k <= 'H'; k++) if (opts.has("" + k)) all.append(k);
                   draft = all.toString();
+                  pendingAnswers.put(id(q), draft);
                   if (exam) examAnswers.put(id(q), draft);
                   refreshOptions(front, q);
                   updateProgress();
@@ -693,6 +876,7 @@ public class MainActivity extends Activity {
 
             public void onTextChanged(CharSequence s, int a, int before, int count) {
               draft = s.toString();
+              pendingAnswers.put(id(q), draft);
               if (exam) {
                 examAnswers.put(id(q), draft);
                 updateProgress();
@@ -708,25 +892,123 @@ public class MainActivity extends Activity {
     if ((!exam && !answer(q).isEmpty()) || review)
       body.addView(
           label("参考答案：" + q.optString("answer") + "\n解析：" + q.optString("explanation"), 16));
-    View divider = new View(this);
-    divider.setBackgroundColor(0xffcbd5e1);
-    root.addView(divider, new LinearLayout.LayoutParams(-1, dp(2)));
-    resultBar = new LinearLayout(this);
-    resultBar.setGravity(Gravity.CENTER_VERTICAL);
-    resultBar.setBackground(bg(Color.WHITE));
-    resultBar.setPadding(dp(8), dp(10), dp(8), dp(10));
-    root.addView(resultBar);
-    updateProgress();
-    if (exam && !review)
-      resultBar.addView(
-          button(
-              "交卷",
-              () ->
-                  new AlertDialog.Builder(this)
-                      .setMessage("确认交卷？未答题按零分计。")
-                      .setPositiveButton("交卷", (d, w) -> finishExam())
-                      .setNegativeButton("继续答题", null)
-                      .show()));
+
+    draft = previousDraft;
+    return new PracticePage(scroll);
+  }
+
+  void ensurePage(int pageIndex) {
+    if (pageIndex < 0 || pageIndex >= questions.size() || practicePages.containsKey(pageIndex))
+      return;
+    PracticePage page = buildPracticePage(pageIndex);
+    practicePages.put(pageIndex, page);
+    practiceViewport.addView(page.view, new FrameLayout.LayoutParams(-1, -1));
+    page.view.setTranslationX((pageIndex - index) * practiceViewport.getWidth());
+    page.view.setImportantForAccessibility(
+        pageIndex == index
+            ? View.IMPORTANT_FOR_ACCESSIBILITY_AUTO
+            : View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);
+  }
+
+  void showPracticePage() {
+    draft = pendingAnswers.getOrDefault(id(questions.get(index)), answer(questions.get(index)));
+    ensurePage(index);
+    toolbarTitle.setText((exam ? "模拟考试" : "顺序练习") + "  " + (index + 1) + "/" + questions.size());
+    FrameLayout owner = practiceViewport;
+    owner.post(
+        () -> {
+          if (practiceViewport != owner || !screen.equals("practice") || turning || dragging)
+            return;
+          // Prepare adjacent layouts outside the drag/settling frames; retain at most three.
+          Iterator<Map.Entry<Integer, PracticePage>> iterator = practicePages.entrySet().iterator();
+          while (iterator.hasNext()) {
+            Map.Entry<Integer, PracticePage> entry = iterator.next();
+            if (Math.abs(entry.getKey() - index) > 1) {
+              owner.removeView(entry.getValue().view);
+              iterator.remove();
+            }
+          }
+          ensurePage(index - 1);
+          ensurePage(index + 1);
+          positionPages(0);
+        });
+  }
+
+  void positionPages(float dx) {
+    if (practiceViewport == null) return;
+    int width = practiceViewport.getWidth();
+    for (Map.Entry<Integer, PracticePage> entry : practicePages.entrySet()) {
+      View view = entry.getValue().view;
+      view.setTranslationX((entry.getKey() - index) * width + dx);
+      view.setScaleX(1f);
+      view.setVisibility(View.VISIBLE);
+      view.setImportantForAccessibility(
+          entry.getKey() == index
+              ? View.IMPORTANT_FOR_ACCESSIBILITY_AUTO
+              : View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);
+    }
+  }
+
+  void dragPages(float dx) {
+    if (practiceViewport == null) return;
+    boolean edge = (dx > 0 && index == 0) || (dx < 0 && index == questions.size() - 1);
+    if (!edge) {
+      positionPages(dx);
+      return;
+    }
+    for (Map.Entry<Integer, PracticePage> entry : practicePages.entrySet()) {
+      View view = entry.getValue().view;
+      if (entry.getKey() != index) {
+        view.setVisibility(View.INVISIBLE);
+        continue;
+      }
+      view.setTranslationX(0);
+      view.setPivotX(dx > 0 ? 0 : view.getWidth());
+      view.setScaleX(SwipePhysics.edgeScale(dx, Math.max(1, view.getWidth())));
+    }
+  }
+
+  void settlePages(int delta) {
+    if (turning || practiceViewport == null) return;
+    if (index + delta < 0 || index + delta >= questions.size()) delta = 0;
+    pendingAnswers.put(id(questions.get(index)), draft);
+    if (exam && !review) examAnswers.put(id(questions.get(index)), draft);
+    final int direction = delta;
+    ensurePage(index + direction);
+    final int from = index;
+    final int revision = pageRevision;
+    final FrameLayout owner = practiceViewport;
+    final int width = owner.getWidth();
+    turning = true;
+    dragging = false;
+    PracticePage current = practicePages.get(index);
+    float distance = Math.abs(direction * width + current.view.getTranslationX());
+    long duration = SwipePhysics.duration(distance, width);
+    for (Map.Entry<Integer, PracticePage> entry : practicePages.entrySet()) {
+      View view = entry.getValue().view;
+      view.animate()
+          .translationX((entry.getKey() - index - direction) * width)
+          .scaleX(1f)
+          .setDuration(duration)
+          .setInterpolator(new android.view.animation.PathInterpolator(0.22f, 0f, 0.12f, 1f))
+          .withLayer();
+    }
+    current
+        .view
+        .animate()
+        .withEndAction(
+            () -> {
+              if (practiceViewport != owner
+                  || revision != pageRevision
+                  || !screen.equals("practice")) return;
+              turning = false;
+              index = from + direction;
+              if (direction != 0 && !exam) {
+                put(bank, "position", index);
+                prefs.edit().putInt("position:" + bank.optString("id"), index).apply();
+              }
+              showPracticePage();
+            });
   }
 
   boolean multiple(JSONObject q) {
@@ -829,22 +1111,49 @@ public class MainActivity extends Activity {
   final class SwipeScroll extends ScrollView {
     float startX, startY;
     boolean swiping, vertical;
+    VelocityTracker velocity;
 
     SwipeScroll() {
       super(MainActivity.this);
     }
 
+    void recycleVelocity() {
+      if (velocity != null) {
+        velocity.recycle();
+        velocity = null;
+      }
+    }
+
+    @Override
+    protected void onDetachedFromWindow() {
+      recycleVelocity();
+      super.onDetachedFromWindow();
+    }
+
     @Override
     public boolean dispatchTouchEvent(MotionEvent event) {
       if (!screen.equals("practice")) return super.dispatchTouchEvent(event);
+      if (turning) return true;
       int action = event.getActionMasked();
       if (action == MotionEvent.ACTION_DOWN) {
-        startX = event.getX();
-        startY = event.getY();
+        startX = event.getRawX();
+        startY = event.getRawY();
         swiping = false;
         vertical = false;
+        recycleVelocity();
+        velocity = VelocityTracker.obtain();
+        ui.removeCallbacks(deferredSave);
+        dragging = true;
+        for (PracticePage page : practicePages.values()) page.view.animate().cancel();
       }
-      float dx = event.getX() - startX, dy = event.getY() - startY;
+      if (velocity != null) {
+        // Velocity must use screen coordinates too: the scroll view follows the finger.
+        MotionEvent screenEvent = MotionEvent.obtain(event);
+        screenEvent.offsetLocation(event.getRawX() - event.getX(), event.getRawY() - event.getY());
+        velocity.addMovement(screenEvent);
+        screenEvent.recycle();
+      }
+      float dx = event.getRawX() - startX, dy = event.getRawY() - startY;
       int slop = ViewConfiguration.get(MainActivity.this).getScaledTouchSlop();
       if (action == MotionEvent.ACTION_MOVE && !swiping && !vertical) {
         if (Math.abs(dy) > slop && Math.abs(dy) > Math.abs(dx)) vertical = true;
@@ -857,34 +1166,35 @@ public class MainActivity extends Activity {
         }
       }
       if (swiping) {
-        boolean edge = (dx > 0 && index == 0) || (dx < 0 && index == questions.size() - 1);
-        if (neighborPreview != null)
-          neighborPreview.setVisibility(edge ? View.INVISIBLE : View.VISIBLE);
-        if (questionCard != null) {
-          questionCard.animate().cancel();
-          if (edge) {
-            questionCard.setTranslationX(0);
-            questionCard.setPivotX(dx > 0 ? 0 : questionCard.getWidth());
-            questionCard.setScaleX(
-                1f + Math.min(Math.abs(dx) / Math.max(1, getWidth()), 1f) * 0.045f);
-          } else {
-            questionCard.setScaleX(1f);
-            questionCard.setTranslationX(dx);
-          }
-        }
+        dragPages(dx);
         if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+          float speed = 0;
+          if (velocity != null) {
+            velocity.computeCurrentVelocity(1000);
+            speed = velocity.getXVelocity();
+          }
+          recycleVelocity();
           swiping = false;
-          if (questionCard != null)
-            questionCard
-                .animate()
-                .translationX(0)
-                .scaleX(1f)
-                .setInterpolator(new android.view.animation.DecelerateInterpolator())
-                .setDuration(220);
-          if (edge) return true;
-          if (action == MotionEvent.ACTION_UP && Math.abs(dx) > dp(70)) move(dx < 0 ? 1 : -1);
+          dragging = false;
+          int delta =
+              action == MotionEvent.ACTION_CANCEL
+                  ? 0
+                  : SwipePhysics.target(
+                      dx,
+                      speed,
+                      getWidth(),
+                      getResources().getDisplayMetrics().density,
+                      index,
+                      questions.size());
+          settlePages(delta);
+          if (pendingSave) ui.postDelayed(deferredSave, 350);
         }
         return true;
+      }
+      if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+        recycleVelocity();
+        dragging = false;
+        if (pendingSave) ui.postDelayed(deferredSave, 350);
       }
       return super.dispatchTouchEvent(event);
     }
@@ -910,7 +1220,8 @@ public class MainActivity extends Activity {
     put(q, "response", draft);
     put(q, "right", ok);
     if (!ok) put(q, "wrong", q.optInt("wrong") + 1);
-    save();
+    pendingAnswers.remove(id(q));
+    saveWhenIdle();
     practice();
     if (ok && prefs.getBoolean("auto", false) && index + 1 < questions.size())
       new Handler()
@@ -922,16 +1233,13 @@ public class MainActivity extends Activity {
   }
 
   void move(int delta) {
-    if (index + delta < 0 || index + delta >= questions.size()) return;
-    if (exam && !review && !draft.isEmpty()) examAnswers.put(id(questions.get(index)), draft);
-    index += delta;
-    if (!exam) {
-      put(bank, "position", index);
-      save();
-    }
-    practice();
-    body.setTranslationX(dp(delta > 0 ? 200 : -200));
-    body.animate().translationX(0).setDuration(240);
+    if (turning
+        || !screen.equals("practice")
+        || index + delta < 0
+        || index + delta >= questions.size()) return;
+    pendingAnswers.put(id(questions.get(index)), draft);
+    if (exam && !review) examAnswers.put(id(questions.get(index)), draft);
+    settlePages(delta);
   }
 
   void toggle(LinearLayout box, String title, String key) {
@@ -969,6 +1277,7 @@ public class MainActivity extends Activity {
               "重练本题",
               () -> {
                 JSONObject q = questions.get(index);
+                pendingAnswers.remove(id(q));
                 q.remove("response");
                 q.remove("right");
                 save();
@@ -1038,6 +1347,7 @@ public class MainActivity extends Activity {
                         } else put(q, e.getKey(), val);
                       }
                       put(q, "options", opts);
+                      pendingAnswers.remove(id(q));
                       q.remove("response");
                       q.remove("right");
                       orders.clear();
