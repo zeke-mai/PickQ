@@ -26,8 +26,10 @@ jobs:
       - name: Test Excel importer
         run: |
           mkdir -p /tmp/pickq-tests
-          javac -encoding UTF-8 -d /tmp/pickq-tests app/src/main/java/com/pickq/Xlsx.java tests/ImportTest.java
-          java -cp /tmp/pickq-tests com.pickq.ImportTest
+          curl --fail --location --retry 3 https://repo.maven.apache.org/maven2/net/sourceforge/jexcelapi/jxl/2.6.12/jxl-2.6.12.jar -o /tmp/jxl.jar
+          javac -encoding UTF-8 -cp /tmp/jxl.jar -d /tmp/pickq-tests app/src/main/java/com/pickq/Xlsx.java app/src/main/java/com/pickq/ExcelImporter.java tests/ImportTest.java tests/LegacyImportTest.java
+          java -cp /tmp/pickq-tests:/tmp/jxl.jar com.pickq.ImportTest
+          java -cp /tmp/pickq-tests:/tmp/jxl.jar com.pickq.LegacyImportTest
       - name: Prepare stable signing key
         if: startsWith(github.ref, 'refs/tags/v')
         env:

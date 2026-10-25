@@ -8,3 +8,4 @@ local.properties
 outputs/
 *.apk
 
+*.xls

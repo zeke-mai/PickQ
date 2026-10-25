@@ -18,3 +18,5 @@ android {
  } }
  buildTypes { release { if (System.getenv('KEYSTORE_FILE')) signingConfig signingConfigs.release } }
 }
+
+dependencies { implementation "net.sourceforge.jexcelapi:jxl:2.6.12" }

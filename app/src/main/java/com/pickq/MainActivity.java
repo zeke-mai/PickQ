@@ -66,7 +66,7 @@ public class MainActivity extends Activity {
     checkUpdate(false);
   }
 
-  void save() {
+  boolean save() {
     try {
       File f = new File(getFilesDir(), "banks.tmp");
       try (FileOutputStream out = new FileOutputStream(f)) {
@@ -74,8 +74,10 @@ public class MainActivity extends Activity {
         out.getFD().sync();
       }
       if (!f.renameTo(new File(getFilesDir(), "banks.json"))) throw new IOException("替换存储失败");
+      return true;
     } catch (Exception e) {
       toast("保存失败：" + e.getMessage());
+      return false;
     }
   }
 
@@ -186,7 +188,14 @@ public class MainActivity extends Activity {
             "＋",
             () -> {
               Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT);
-              i.setType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+              i.setType("*/*");
+              i.putExtra(
+                  Intent.EXTRA_MIME_TYPES,
+                  new String[] {
+                    "application/vnd.ms-excel",
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    "application/octet-stream"
+                  });
               i.addCategory(Intent.CATEGORY_OPENABLE);
               startActivityForResult(i, 1);
             }));
@@ -219,7 +228,7 @@ public class MainActivity extends Activity {
     body.addView(label("未分组题库", 16));
     for (JSONObject item : sortedBanks()) if (item.optString("folder").isEmpty()) bankCard(item);
     if (banks.length() == 0)
-      card("导入你的第一份题库", "点击右上角 ＋ 选择 Excel (.xlsx)", () -> toast("支持模板列名，非必要列可以省略"));
+      card("导入你的第一份题库", "点击右上角 ＋ 选择 Excel (.xls / .xlsx)", () -> toast("支持模板列名，非必要列可以省略"));
     cloudCard();
   }
 
@@ -318,12 +327,49 @@ public class MainActivity extends Activity {
     new AlertDialog.Builder(this)
         .setTitle("题库设置")
         .setItems(
-            new String[] {"编辑题库名字", "移动至文件夹"},
+            new String[] {"编辑题库名字", "移动至文件夹", "删除题库"},
             (d, which) -> {
               if (which == 0) renameBank();
-              else moveBank();
+              else if (which == 1) moveBank();
+              else deleteBank();
             })
         .setNegativeButton("取消", null)
+        .show();
+  }
+
+  void deleteBank() {
+    JSONObject target = bank;
+    new AlertDialog.Builder(this)
+        .setTitle("删除题库")
+        .setMessage(
+            "确定删除“"
+                + target.optString("name")
+                + "”？共 "
+                + target.optJSONArray("questions").length()
+                + " 题，其作答、练习进度和错题记录将一并删除，无法恢复。原始 Excel 文件不会删除。")
+        .setNegativeButton("取消", null)
+        .setPositiveButton(
+            "删除",
+            (d, w) -> {
+              JSONArray remaining = new JSONArray();
+              for (int i = 0; i < banks.length(); i++)
+                if (banks.optJSONObject(i) != target) remaining.put(banks.optJSONObject(i));
+              JSONArray previous = banks;
+              banks = remaining;
+              if (!save()) {
+                banks = previous;
+                return;
+              }
+              bank = null;
+              questions.clear();
+              examAnswers.clear();
+              orders.clear();
+              points.clear();
+              exam = false;
+              review = false;
+              home();
+              toast("题库已删除");
+            })
         .show();
   }
 
@@ -419,7 +465,7 @@ public class MainActivity extends Activity {
             () -> {
               try {
                 List<Map<String, String>> rows =
-                    Xlsx.read(getContentResolver().openInputStream(uri));
+                    ExcelImporter.read(getContentResolver().openInputStream(uri));
                 JSONArray qs = new JSONArray();
                 for (Map<String, String> row : rows) {
                   JSONObject q = new JSONObject();
@@ -460,7 +506,7 @@ public class MainActivity extends Activity {
                   if (cur != null && cur.moveToFirst()) {
                     int col = cur.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME);
                     if (col >= 0)
-                      put(b, "name", cur.getString(col).replaceFirst("(?i)\\.xlsx$", ""));
+                      put(b, "name", cur.getString(col).replaceFirst("(?i)\\.xlsx?$", ""));
                   }
                 }
                 put(b, "questions", qs);

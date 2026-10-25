@@ -73,8 +73,10 @@ public final class Xlsx {
 
   static String header(String s) {
     s = s.replaceAll("\\s", "").replaceAll("[（(].*", "");
-    if (s.equals("题目")) return "题干";
-    if (s.equals("答案")) return "正确答案";
+    if (s.equals("题目") || s.equals("试题内容")) return "题干";
+    if (s.equals("答案") || s.equals("正确选项")) return "正确答案";
+    if (s.equals("教材名称")) return "章节";
+    if (s.matches("[A-Ha-h]")) return "选项" + s.toUpperCase(Locale.ROOT);
     return s;
   }
 
