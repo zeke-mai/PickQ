@@ -45,6 +45,14 @@ public class MainActivity extends Activity {
 
   TextView progressLabel;
   LinearLayout resultBar;
+  long importGeneration;
+  Uri pendingImportUri;
+  ProgressDialog importProgress;
+  ImportReview.Report previewReport;
+  EditText importName;
+  CheckBox skipImportDuplicates, onlyImportIssues;
+  Button importConfirm;
+  ListView importList;
 
   void put(JSONObject o, String k, Object v) {
     try {
@@ -84,7 +92,9 @@ public class MainActivity extends Activity {
       }
     if (migrated) save();
     home();
-    checkUpdate(false);
+    if (b != null && b.containsKey("pendingImportUri"))
+      requestImport(Uri.parse(b.getString("pendingImportUri")));
+    else if (!handleIncomingIntent(getIntent())) checkUpdate(false);
   }
 
   boolean save() {
@@ -140,6 +150,8 @@ public class MainActivity extends Activity {
 
   @Override
   protected void onDestroy() {
+    importGeneration++;
+    if (importProgress != null) importProgress.dismiss();
     screen = "closed";
     pageRevision++;
     practiceViewport = null;
@@ -570,73 +582,344 @@ public class MainActivity extends Activity {
       importUpdate(data.getData());
       return;
     }
-    if (r != 1 || c != RESULT_OK || data == null) return;
-    Uri uri = data.getData();
-    toast("正在读取题库…");
+    if (r == 1 && c == RESULT_OK && data != null) requestImport(data.getData());
+  }
+
+  @Override
+  protected void onNewIntent(Intent intent) {
+    super.onNewIntent(intent);
+    setIntent(intent);
+    handleIncomingIntent(intent);
+  }
+
+  @Override
+  protected void onSaveInstanceState(Bundle state) {
+    if (pendingImportUri != null) state.putString("pendingImportUri", pendingImportUri.toString());
+    super.onSaveInstanceState(state);
+  }
+
+  static Uri incomingUri(Intent intent) {
+    if (intent == null) return null;
+    Uri uri = null;
+    if (Intent.ACTION_VIEW.equals(intent.getAction())) uri = intent.getData();
+    else if (Intent.ACTION_SEND.equals(intent.getAction())) {
+      try {
+        Object value = intent.getParcelableExtra(Intent.EXTRA_STREAM);
+        if (value instanceof Uri) uri = (Uri) value;
+      } catch (RuntimeException ignored) {
+      }
+      if (uri == null && intent.getClipData() != null && intent.getClipData().getItemCount() == 1)
+        uri = intent.getClipData().getItemAt(0).getUri();
+    }
+    return uri != null && ("content".equals(uri.getScheme()) || "file".equals(uri.getScheme()))
+        ? uri
+        : null;
+  }
+
+  boolean handleIncomingIntent(Intent intent) {
+    if (intent == null
+        || (!Intent.ACTION_VIEW.equals(intent.getAction())
+            && !Intent.ACTION_SEND.equals(intent.getAction()))) return false;
+    Uri uri = incomingUri(intent);
+    setIntent(new Intent(this, MainActivity.class));
+    if (uri == null) toast("未收到可读取的文件，请在其他应用中选择一个 Excel 文件并打开或分享给 PickQ");
+    else requestImport(uri);
+    return true;
+  }
+
+  void requestImport(Uri uri) {
+    if (uri == null) {
+      toast("未收到题库文件");
+      return;
+    }
+    if (screen.equals("practice") && exam && !review) {
+      new AlertDialog.Builder(this)
+          .setTitle("正在考试")
+          .setMessage("退出当前未交卷考试并预览导入的文件？")
+          .setPositiveButton(
+              "退出并预览",
+              (d, w) -> {
+                exam = false;
+                home();
+                startImport(uri);
+              })
+          .setNegativeButton("继续考试", null)
+          .show();
+    } else startImport(uri);
+  }
+
+  List<Map<String, String>> existingImportRows() {
+    List<Map<String, String>> existing = new ArrayList<>();
+    for (int b = 0; b < banks.length(); b++) {
+      JSONObject library = banks.optJSONObject(b);
+      JSONArray list = library.optJSONArray("questions");
+      for (int i = 0; i < list.length(); i++) {
+        JSONObject q = list.optJSONObject(i);
+        Map<String, String> row = new HashMap<>();
+        row.put("题型", q.optString("type"));
+        row.put("题干", q.optString("title"));
+        row.put("正确答案", q.optString("answer"));
+        JSONObject options = q.optJSONObject("options");
+        if (options != null)
+          for (char c = 'A'; c <= 'H'; c++)
+            if (options.has("" + c)) row.put("选项" + c, options.optString("" + c));
+        row.put("__existingBank", library.optString("name"));
+        existing.add(row);
+      }
+    }
+    return existing;
+  }
+
+  void startImport(Uri uri) {
+    long generation = ++importGeneration;
+    pendingImportUri = uri;
+    if (importProgress != null) importProgress.dismiss();
+    ProgressDialog progress = new ProgressDialog(this);
+    importProgress = progress;
+    progress.setMessage("正在检查题目格式和重复题…");
+    progress.setCancelable(true);
+    progress.setOnCancelListener(
+        d -> {
+          if (generation == importGeneration) {
+            importGeneration++;
+            pendingImportUri = null;
+          }
+        });
+    progress.show();
+    List<Map<String, String>> existing = existingImportRows();
     new Thread(
             () -> {
               try {
                 List<Map<String, String>> rows =
-                    ExcelImporter.read(getContentResolver().openInputStream(uri));
-                JSONArray qs = new JSONArray();
-                for (Map<String, String> row : rows) {
-                  JSONObject q = new JSONObject();
-                  put(q, "id", UUID.randomUUID().toString());
-                  put(q, "title", row.get("题干"));
-                  put(q, "type", row.getOrDefault("题型", "单选题"));
-                  JSONObject opts = new JSONObject();
-                  for (char a = 'A'; a <= 'H'; a++) {
-                    String v = row.getOrDefault("选项" + a, "");
-                    if (!v.isEmpty()) put(opts, "" + a, v);
-                  }
-                  put(q, "options", opts);
-                  String ans = row.getOrDefault("正确答案", "");
-                  if (q.optString("type").equals("填空题") && ans.isEmpty()) {
-                    ArrayList<String> values = new ArrayList<>();
-                    for (char a = 'A'; a <= 'H'; a++)
-                      if (opts.has("" + a)) values.add(opts.optString("" + a));
-                    ans = String.join("|", values);
-                  }
-                  if (q.optString("type").equals("判断题")) {
-                    if (opts.length() == 0) {
-                      put(opts, "A", "正确");
-                      put(opts, "B", "错误");
-                    }
-                    if (Arrays.asList("正确", "对", "√", "是").contains(ans)) ans = "A";
-                    if (Arrays.asList("错误", "错", "×", "否").contains(ans)) ans = "B";
-                  }
-                  put(q, "answer", ans);
-                  put(q, "explanation", row.getOrDefault("解析", ""));
-                  put(q, "chapter", row.getOrDefault("章节", ""));
-                  put(q, "difficulty", row.getOrDefault("难度", ""));
-                  qs.put(q);
-                }
-                JSONObject b = new JSONObject();
-                put(b, "id", UUID.randomUUID().toString());
-                put(b, "name", "新题库");
-                try (android.database.Cursor cur =
+                    ExcelImporter.readForPreview(getContentResolver().openInputStream(uri));
+                ImportReview.Report report = ImportReview.analyze(rows, existing);
+                String filename = "新题库";
+                try (android.database.Cursor cursor =
                     getContentResolver().query(uri, null, null, null, null)) {
-                  if (cur != null && cur.moveToFirst()) {
-                    int col = cur.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME);
-                    if (col >= 0)
-                      put(b, "name", cur.getString(col).replaceFirst("(?i)\\.xlsx?$", ""));
+                  if (cursor != null && cursor.moveToFirst()) {
+                    int column =
+                        cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME);
+                    if (column >= 0 && !cursor.isNull(column))
+                      filename = cursor.getString(column).replaceFirst("(?i)\\.xlsx?$", "");
                   }
+                } catch (RuntimeException ignored) {
                 }
-                put(b, "questions", qs);
-                put(b, "imported", System.currentTimeMillis());
-                put(b, "visited", System.currentTimeMillis());
+                String name = filename;
                 runOnUiThread(
                     () -> {
-                      banks.put(b);
-                      save();
-                      home();
-                      toast("已导入 " + qs.length() + " 题");
+                      if (generation != importGeneration || isFinishing() || isDestroyed()) return;
+                      progress.dismiss();
+                      importProgress = null;
+                      showImportPreview(report, name);
                     });
-              } catch (Exception e) {
-                runOnUiThread(() -> toast("导入失败：" + e.getMessage()));
+              } catch (Exception error) {
+                runOnUiThread(
+                    () -> {
+                      if (generation != importGeneration || isFinishing() || isDestroyed()) return;
+                      progress.dismiss();
+                      importProgress = null;
+                      pendingImportUri = null;
+                      toast("无法读取题库：" + error.getMessage());
+                    });
               }
-            })
+            },
+            "pickq-import")
         .start();
+  }
+
+  void showImportPreview(ImportReview.Report report, String name) {
+    previewReport = report;
+    screen = "import";
+    shell("导入预览");
+    bar.addView(button("‹", () -> cancelImport()), 0);
+    root.removeViewAt(1);
+    LinearLayout content = new LinearLayout(this);
+    content.setOrientation(LinearLayout.VERTICAL);
+    root.addView(content, 1, new LinearLayout.LayoutParams(-1, 0, 1));
+    importName = new EditText(this);
+    importName.setSingleLine();
+    importName.setHint("题库名字");
+    importName.setText(name);
+    content.addView(importName);
+    content.addView(
+        label(
+            "共 "
+                + report.entries.size()
+                + " 道 · 格式错误 "
+                + report.errors
+                + " · 重复 "
+                + report.duplicates
+                + " · 提示 "
+                + report.warnings,
+            14));
+    TextView rules = label("点击题目查看检查详情；格式错误题不会导入。缺少标准答案的题将以人工判分方式导入。", 12);
+    rules.setTextColor(0xff6e7b93);
+    content.addView(rules);
+    skipImportDuplicates = new CheckBox(this);
+    skipImportDuplicates.setText("跳过完全重复题（含已导入题库中的题）");
+    skipImportDuplicates.setChecked(true);
+    content.addView(skipImportDuplicates);
+    onlyImportIssues = new CheckBox(this);
+    onlyImportIssues.setText("只看错误、重复和需核对的题");
+    content.addView(onlyImportIssues);
+    importList = new ListView(this);
+    importList.setDividerHeight(dp(1));
+    content.addView(importList, new LinearLayout.LayoutParams(-1, 0, 1));
+    LinearLayout footer = new LinearLayout(this);
+    footer.setPadding(0, dp(8), 0, 0);
+    root.addView(footer);
+    footer.addView(button("取消", () -> cancelImport()));
+    importConfirm = button("确认导入", () -> confirmImport());
+    footer.addView(importConfirm, new LinearLayout.LayoutParams(0, -2, 1));
+    skipImportDuplicates.setOnCheckedChangeListener((v, checked) -> refreshImportPreview());
+    onlyImportIssues.setOnCheckedChangeListener((v, checked) -> refreshImportPreview());
+    refreshImportPreview();
+  }
+
+  void refreshImportPreview() {
+    if (previewReport == null) return;
+    List<ImportReview.Entry> visible = new ArrayList<>();
+    for (ImportReview.Entry entry : previewReport.entries)
+      if (!onlyImportIssues.isChecked()
+          || !entry.valid()
+          || !entry.duplicate.isEmpty()
+          || !entry.warnings.isEmpty()) visible.add(entry);
+    importList.setAdapter(
+        new BaseAdapter() {
+          public int getCount() {
+            return visible.size();
+          }
+
+          public Object getItem(int i) {
+            return visible.get(i);
+          }
+
+          public long getItemId(int i) {
+            return i;
+          }
+
+          public View getView(int i, View recycled, ViewGroup parent) {
+            TextView view = recycled instanceof TextView ? (TextView) recycled : label("", 14);
+            ImportReview.Entry entry = visible.get(i);
+            view.setMaxLines(4);
+            view.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            String issue =
+                !entry.errors.isEmpty()
+                    ? entry.errors.get(0)
+                    : !entry.duplicate.isEmpty()
+                        ? entry.duplicate
+                        : !entry.warnings.isEmpty() ? entry.warnings.get(0) : entry.row.get("题型");
+            view.setText(
+                entry.status()
+                    + " · "
+                    + entry.location()
+                    + "\n"
+                    + (entry.row.getOrDefault("题干", "").isEmpty() ? "（缺少题干）" : entry.row.get("题干"))
+                    + "\n"
+                    + issue);
+            view.setTextColor(
+                !entry.valid() ? 0xffcb3344 : !entry.duplicate.isEmpty() ? 0xff9b6819 : 0xff263650);
+            return view;
+          }
+        });
+    importList.setOnItemClickListener(
+        (parent, view, index, id) -> showImportEntry(visible.get(index)));
+    int count = previewReport.selected(skipImportDuplicates.isChecked()).size();
+    importConfirm.setText("确认导入 " + count + " 题");
+    importConfirm.setEnabled(count > 0);
+  }
+
+  void showImportEntry(ImportReview.Entry entry) {
+    StringBuilder detail =
+        new StringBuilder(entry.location()).append("\n").append(entry.status()).append("\n");
+    for (String issue : entry.errors) detail.append("错误：").append(issue).append("\n");
+    if (!entry.duplicate.isEmpty()) detail.append(entry.duplicate).append("\n");
+    for (String note : entry.warnings) detail.append("提示：").append(note).append("\n");
+    detail
+        .append("\n")
+        .append(entry.row.get("题型"))
+        .append("\n")
+        .append(entry.row.getOrDefault("题干", ""));
+    for (char c = 'A'; c <= 'H'; c++)
+      if (!entry.row.getOrDefault("选项" + c, "").isEmpty())
+        detail.append("\n").append(c).append(". ").append(entry.row.get("选项" + c));
+    detail.append("\n\n标准答案：").append(entry.row.getOrDefault("正确答案", "（未提供）"));
+    if (!entry.row.getOrDefault("解析", "").isEmpty())
+      detail.append("\n解析：").append(entry.row.get("解析"));
+    ScrollView scroll = new ScrollView(this);
+    scroll.addView(label(detail.toString(), 16));
+    new AlertDialog.Builder(this)
+        .setTitle("题目检查详情")
+        .setView(scroll)
+        .setPositiveButton("关闭", null)
+        .show();
+  }
+
+  JSONObject importedQuestion(Map<String, String> row) {
+    JSONObject q = new JSONObject(), options = new JSONObject();
+    put(q, "id", UUID.randomUUID().toString());
+    put(q, "title", row.getOrDefault("题干", ""));
+    put(q, "type", row.getOrDefault("题型", "单选题"));
+    for (char c = 'A'; c <= 'H'; c++)
+      if (!row.getOrDefault("选项" + c, "").isEmpty()) put(options, "" + c, row.get("选项" + c));
+    put(q, "options", options);
+    put(q, "answer", row.getOrDefault("正确答案", ""));
+    put(q, "explanation", row.getOrDefault("解析", ""));
+    put(q, "chapter", row.getOrDefault("章节", ""));
+    put(q, "difficulty", row.getOrDefault("难度", ""));
+    return q;
+  }
+
+  void confirmImport() {
+    if (previewReport == null) return;
+    String name = importName.getText().toString().trim();
+    if (name.isEmpty() || name.length() > 100) {
+      importName.setError("请填写 1–100 个字符的题库名字");
+      return;
+    }
+    List<ImportReview.Entry> selected = previewReport.selected(skipImportDuplicates.isChecked());
+    if (selected.isEmpty()) {
+      toast("没有可导入的题目");
+      return;
+    }
+    JSONArray questions = new JSONArray();
+    for (ImportReview.Entry entry : selected) questions.put(importedQuestion(entry.row));
+    JSONObject library = new JSONObject();
+    put(library, "id", UUID.randomUUID().toString());
+    put(library, "name", name);
+    put(library, "questions", questions);
+    put(library, "imported", System.currentTimeMillis());
+    put(library, "visited", System.currentTimeMillis());
+    JSONArray previous = banks, updated = new JSONArray();
+    for (int i = 0; i < banks.length(); i++) updated.put(banks.optJSONObject(i));
+    updated.put(library);
+    banks = updated;
+    if (!save()) {
+      banks = previous;
+      return;
+    }
+    importGeneration++;
+    pendingImportUri = null;
+    previewReport = null;
+    bank = null;
+    exam = false;
+    review = false;
+    this.questions.clear();
+    pendingAnswers.clear();
+    orders.clear();
+    examAnswers.clear();
+    points.clear();
+    setIntent(new Intent(this, MainActivity.class));
+    home();
+    toast("已导入 " + questions.length() + " 题");
+  }
+
+  void cancelImport() {
+    importGeneration++;
+    pendingImportUri = null;
+    previewReport = null;
+    setIntent(new Intent(this, MainActivity.class));
+    home();
   }
 
   void bankPage() {
@@ -1750,6 +2033,10 @@ public class MainActivity extends Activity {
 
   @Override
   public void onBackPressed() {
+    if (screen.equals("import")) {
+      cancelImport();
+      return;
+    }
     if (screen.equals("home")) super.onBackPressed();
     else if (screen.equals("bank") || screen.equals("folder")) home();
     else if (exam && !review && screen.equals("practice"))
