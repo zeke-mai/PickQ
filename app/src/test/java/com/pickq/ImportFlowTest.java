@@ -55,8 +55,7 @@ public class ImportFlowTest {
   }
 
   ImportReview.Report report() {
-    return ImportReview.analyze(
-        Arrays.asList(row("正常题", "A"), row("正常题", "A"), row("错误题", "Z")), Collections.emptyList());
+    return ImportReview.analyze(Arrays.asList(row("正常题", "A"), row("正常题", "A"), row("错误题", "Z")));
   }
 
   @Test
@@ -99,18 +98,10 @@ public class ImportFlowTest {
   }
 
   @Test
-  public void allInvalidOrAllSkippedDisablesConfirmation() {
+  public void allInvalidDisablesConfirmation() {
     activity.showImportPreview(
-        ImportReview.analyze(Collections.singletonList(row("错误题", "Z")), Collections.emptyList()),
-        "错误");
+        ImportReview.analyze(Collections.singletonList(row("错误题", "Z"))), "错误");
     assertFalse(activity.importConfirm.isEnabled());
-    activity.showImportPreview(
-        ImportReview.analyze(
-            Collections.singletonList(row("重复", "A")), Collections.singletonList(row("重复", "A"))),
-        "重复");
-    assertFalse(activity.importConfirm.isEnabled());
-    activity.skipImportDuplicates.setChecked(false);
-    assertTrue(activity.importConfirm.isEnabled());
   }
 
   @Test
@@ -249,5 +240,32 @@ public class ImportFlowTest {
     assertTrue(activity.exam);
     assertEquals("practice", activity.screen);
     assertNull(activity.previewReport);
+  }
+
+  @Test
+  public void existingLibraryDoesNotAffectDocumentDuplicateReview() throws Exception {
+    JSONObject existing =
+        new JSONObject()
+            .put("id", "old")
+            .put("name", "已有题库")
+            .put(
+                "questions",
+                new JSONArray()
+                    .put(activity.importedQuestion(ImportReview.check(row("正常题", "A")).row)));
+    activity.banks.put(existing);
+    activity.showImportPreview(
+        ImportReview.analyze(Collections.singletonList(row("正常题", "A"))), "再次导入");
+    assertEquals(0, activity.previewReport.duplicates);
+    assertTrue(activity.importConfirm.isEnabled());
+    activity.importConfirm.performClick();
+    assertEquals(2, activity.banks.length());
+    assertEquals(
+        "正常题",
+        activity
+            .banks
+            .getJSONObject(1)
+            .getJSONArray("questions")
+            .getJSONObject(0)
+            .getString("title"));
   }
 }

@@ -66,8 +66,7 @@ public class ImportReaderTest {
     check(rows.size() == 2, "Missing-stem rows retained, empty rows skipped");
     check(rows.get(0).get("__row").equals("7"), "Original row number");
     check(rows.get(0).get("__sheet").equals("电气题库"), "Workbook sheet name");
-    check(
-        ImportReview.analyze(rows, Collections.emptyList()).errors == 1, "Missing title reported");
+    check(ImportReview.analyze(rows).errors == 1, "Missing title reported");
     rows =
         ExcelImporter.readForPreview(
             new ByteArrayInputStream(
@@ -93,7 +92,7 @@ public class ImportReaderTest {
     rows = ExcelImporter.readForPreview(new ByteArrayInputStream(bytes.toByteArray()));
     check(rows.size() == 2, "Invalid legacy rows preserved");
     check(
-        ImportReview.analyze(rows, Collections.emptyList()).errors == 2,
+        ImportReview.analyze(rows).errors == 2,
         "Unsupported legacy type and missing scenario visible");
     check(rows.get(1).get("__row").equals("3"), "XLS row source");
     try {

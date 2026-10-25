@@ -58,17 +58,9 @@ public final class ImportReview {
     }
   }
 
-  public static Report analyze(
-      List<Map<String, String>> incoming, List<Map<String, String>> existing) {
+  public static Report analyze(List<Map<String, String>> incoming) {
     Map<String, String> exact = new HashMap<>();
     Set<String> stems = new HashSet<>();
-    for (Map<String, String> row : existing) {
-      Entry e = check(row);
-      if (e.valid()) {
-        exact.put(fingerprint(e.row), "题库“" + row.getOrDefault("__existingBank", "已导入题库") + "”");
-        stems.add(stem(e.row));
-      }
-    }
     List<Entry> result = new ArrayList<>();
     int sequence = 0;
     for (Map<String, String> row : incoming) {

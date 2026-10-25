@@ -29,8 +29,7 @@ public final class ImportReviewTest {
     Map<String, String> noAnswer = row("无答案", "单选题", "");
     ImportReview.Report report =
         ImportReview.analyze(
-            Arrays.asList(base, swapped, invalid, empty, unsupported, conflict, noAnswer),
-            Collections.emptyList());
+            Arrays.asList(base, swapped, invalid, empty, unsupported, conflict, noAnswer));
     check(report.entries.size() == 7, "All questions preserved in review");
     check(report.errors == 3, "Format errors");
     check(report.duplicates == 1, "Reordered options and whitespace are duplicates");
@@ -43,10 +42,8 @@ public final class ImportReviewTest {
         report.entries.get(6).valid() && !report.entries.get(6).warnings.isEmpty(),
         "Missing answer warns and allows self assessment");
     check(
-        ImportReview.analyze(Collections.singletonList(swapped), Collections.singletonList(base))
-                .duplicates
-            == 1,
-        "Existing bank comparison");
+        ImportReview.analyze(Collections.singletonList(swapped)).duplicates == 0,
+        "A single document question is not a duplicate");
     Map<String, String> bool = row("反序判断", "判断题", "正确");
     bool.put("选项A", "错");
     bool.put("选项B", "对");
@@ -67,7 +64,7 @@ public final class ImportReviewTest {
     orphan.put("__error", "材料小题缺少共用题干");
     check(!ImportReview.check(orphan).valid(), "Parser errors are visible");
     System.out.println(
-        "PASS: format review, duplicate choices/reordering, existing banks, conflicts, missing"
-            + " answers, judgment, invalid options and source errors");
+        "PASS: format review, duplicate choices/reordering, document-only comparison, conflicts,"
+            + " missing answers, judgment, invalid options and source errors");
   }
 }

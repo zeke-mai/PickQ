@@ -648,28 +648,6 @@ public class MainActivity extends Activity {
     } else startImport(uri);
   }
 
-  List<Map<String, String>> existingImportRows() {
-    List<Map<String, String>> existing = new ArrayList<>();
-    for (int b = 0; b < banks.length(); b++) {
-      JSONObject library = banks.optJSONObject(b);
-      JSONArray list = library.optJSONArray("questions");
-      for (int i = 0; i < list.length(); i++) {
-        JSONObject q = list.optJSONObject(i);
-        Map<String, String> row = new HashMap<>();
-        row.put("题型", q.optString("type"));
-        row.put("题干", q.optString("title"));
-        row.put("正确答案", q.optString("answer"));
-        JSONObject options = q.optJSONObject("options");
-        if (options != null)
-          for (char c = 'A'; c <= 'H'; c++)
-            if (options.has("" + c)) row.put("选项" + c, options.optString("" + c));
-        row.put("__existingBank", library.optString("name"));
-        existing.add(row);
-      }
-    }
-    return existing;
-  }
-
   void startImport(Uri uri) {
     long generation = ++importGeneration;
     pendingImportUri = uri;
@@ -686,13 +664,12 @@ public class MainActivity extends Activity {
           }
         });
     progress.show();
-    List<Map<String, String>> existing = existingImportRows();
     new Thread(
             () -> {
               try {
                 List<Map<String, String>> rows =
                     ExcelImporter.readForPreview(getContentResolver().openInputStream(uri));
-                ImportReview.Report report = ImportReview.analyze(rows, existing);
+                ImportReview.Report report = ImportReview.analyze(rows);
                 String filename = "新题库";
                 try (android.database.Cursor cursor =
                     getContentResolver().query(uri, null, null, null, null)) {
@@ -756,7 +733,7 @@ public class MainActivity extends Activity {
     rules.setTextColor(0xff6e7b93);
     content.addView(rules);
     skipImportDuplicates = new CheckBox(this);
-    skipImportDuplicates.setText("跳过完全重复题（含已导入题库中的题）");
+    skipImportDuplicates.setText("跳过当前文档内的完全重复题");
     skipImportDuplicates.setChecked(true);
     content.addView(skipImportDuplicates);
     onlyImportIssues = new CheckBox(this);
