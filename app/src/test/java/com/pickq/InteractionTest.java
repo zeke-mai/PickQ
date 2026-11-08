@@ -5,10 +5,17 @@ import static org.robolectric.Shadows.shadowOf;
 
 import android.app.AlertDialog;
 import android.os.Looper;
+import android.view.Gravity;
 import android.view.View;
+import android.view.ViewGroup;
+import android.widget.Button;
+import android.widget.CheckBox;
 import android.widget.FrameLayout;
+import android.widget.TextView;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.Arrays;
+import java.util.HashSet;
 import org.json.*;
 import org.junit.*;
 import org.junit.runner.RunWith;
@@ -76,6 +83,87 @@ public class InteractionTest {
   void settle() {
     shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(1));
     layout();
+  }
+
+  View withText(View view, String text) {
+    if (view instanceof TextView && ((TextView) view).getText().toString().equals(text)) return view;
+    if (view instanceof ViewGroup) {
+      ViewGroup group = (ViewGroup) view;
+      for (int i = 0; i < group.getChildCount(); i++) {
+        View match = withText(group.getChildAt(i), text);
+        if (match != null) return match;
+      }
+    }
+    return null;
+  }
+
+  @Test
+  public void shuffledLabelsKeepGradingAndFeedbackTiedToOptionContent() throws Exception {
+    JSONObject question = activity.bank.getJSONArray("questions").getJSONObject(0);
+    question.getJSONObject("options").put("C", "Three");
+    activity.start(false);
+    activity.orders.put("q0", Arrays.asList("C", "A", "B"));
+    activity.practice();
+    View page = activity.practicePages.get(0).view;
+    Button wrong = page.findViewWithTag("C"), correct = page.findViewWithTag("A");
+    assertEquals("A  Three", wrong.getText().toString());
+    assertEquals("B  One", correct.getText().toString());
+    assertEquals(Gravity.START, wrong.getGravity() & Gravity.RELATIVE_HORIZONTAL_GRAVITY_MASK);
+    assertEquals("", ((TextView) activity.bar.getChildAt(0)).getText().toString());
+
+    CheckBox all = (CheckBox) withText(page, "全选");
+    View submit = withText(page, "提交答案");
+    assertSame(all.getParent(), submit.getParent());
+    assertNotSame(all.getParent(), wrong.getParent());
+    all.performClick();
+    assertEquals("ABC", activity.draft);
+    all.performClick();
+    assertEquals("", activity.draft);
+    wrong.performClick();
+    correct.performClick();
+    submit.performClick();
+
+    page = activity.practicePages.get(0).view;
+    assertNotNull(withText(page, "A  Three  ·  错选"));
+    assertNotNull(withText(page, "B  One  ·  选对"));
+    assertNotNull(withText(page, "C  Two  ·  漏选"));
+    assertNotNull(withText(page, "参考答案：BC\n解析："));
+    assertEquals(0xffc62828, ((Button) page.findViewWithTag("C")).getCurrentTextColor());
+    assertEquals("CA", question.getString("response"));
+    assertFalse(question.getBoolean("right"));
+  }
+
+  @Test
+  public void randomPracticeUsesEveryQuestionWithoutChangingSequentialPosition() {
+    activity.prefs.edit().putInt("position:fixture", 2).commit();
+    activity.bankPage();
+    View random = withText(activity.root, "随机练习");
+    assertNotNull(random);
+    assertTrue(((View) random.getParent().getParent()).performClick());
+    assertTrue(activity.randomPractice);
+    assertEquals(0, activity.index);
+    HashSet<String> ids = new HashSet<>();
+    for (JSONObject q : activity.questions) ids.add(activity.id(q));
+    assertEquals(new HashSet<>(Arrays.asList("q0", "q1", "q2", "q3")), ids);
+    layout();
+    activity.move(1);
+    settle();
+    assertEquals(1, activity.index);
+    activity.start(false);
+    assertEquals(2, activity.index);
+  }
+
+  @Test
+  public void correctAnswerStartsAutomaticTurnWithin120Milliseconds() {
+    activity.prefs.edit().putBoolean("auto", true).commit();
+    activity.start(false);
+    layout();
+    activity.draft = "AB";
+    activity.submit(activity.questions.get(0));
+    shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(120));
+    assertTrue(activity.turning || activity.index == 1);
+    settle();
+    assertEquals(1, activity.index);
   }
 
   @Test

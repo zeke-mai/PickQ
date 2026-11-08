@@ -17,6 +17,7 @@ public class ImportReaderTest {
     try (ZipOutputStream zip = new ZipOutputStream(bytes)) {
       String[][] files = {
         {"xl/worksheets/sheet1.xml", sheet},
+        {"xl/sharedStrings.xml", "<sst><si><t>_x00b1_2 ℃</t></si></sst>"},
         {
           "xl/workbook.xml",
           "<workbook"
@@ -55,11 +56,11 @@ public class ImportReaderTest {
             + cell("D7", "甲")
             + cell("E7", "乙")
             + "</row><row r='8'>"
-            + cell("A8", "完整题")
+            + cell("A8", "公差 ±1 或 _x00B1_2，字面量 _x005F_x00B1_")
             + cell("B8", "单选题")
             + cell("C8", "A")
-            + cell("D8", "甲")
-            + cell("E8", "乙")
+            + "<c r='D8' t='s'><v>0</v></c>"
+            + "<c r='E8' t='str'><v>_x2264_3</v></c>"
             + "</row><row r='9'/></sheetData></worksheet>";
     List<Map<String, String>> rows =
         ExcelImporter.readForPreview(new ByteArrayInputStream(xlsx(sheet)));
@@ -67,6 +68,9 @@ public class ImportReaderTest {
     check(rows.get(0).get("__row").equals("7"), "Original row number");
     check(rows.get(0).get("__sheet").equals("电气题库"), "Workbook sheet name");
     check(ImportReview.analyze(rows).errors == 1, "Missing title reported");
+    check(rows.get(1).get("题干").equals("公差 ±1 或 ±2，字面量 _x00B1_"), "XLSX inline symbols");
+    check(rows.get(1).get("选项A").equals("±2 ℃"), "XLSX shared string symbols");
+    check(rows.get(1).get("选项B").equals("≤3"), "XLSX cached string symbols");
     rows =
         ExcelImporter.readForPreview(
             new ByteArrayInputStream(

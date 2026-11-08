@@ -2,12 +2,16 @@ package com.pickq;
 
 import java.io.*;
 import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.zip.*;
 import javax.xml.parsers.*;
 import org.w3c.dom.*;
 
 /** Reads values only. Template prose and formulas are never executed. */
 public final class Xlsx {
+  private static final Pattern ESCAPED_CHARACTER = Pattern.compile("_x([0-9a-fA-F]{4})_");
+
   public static List<Map<String, String>> read(InputStream input) throws Exception {
     return read(input, false);
   }
@@ -80,6 +84,7 @@ public final class Xlsx {
           String v = text(c, "v");
           if (c.getAttribute("t").equals("s")) v = strings.get(Integer.parseInt(v));
           else if (c.getAttribute("t").equals("inlineStr")) v = text(c, "t");
+          else if (c.getAttribute("t").equals("str")) v = decodeText(v);
           cells.put(col, v.trim());
         }
         for (String value : cells.values()) if (!value.isEmpty()) sheetHasData = true;
@@ -139,8 +144,24 @@ public final class Xlsx {
   static String text(Element e, String tag) {
     NodeList n = e.getElementsByTagName(tag);
     StringBuilder s = new StringBuilder();
-    for (int i = 0; i < n.getLength(); i++) s.append(n.item(i).getTextContent());
+    for (int i = 0; i < n.getLength(); i++) {
+      String value = n.item(i).getTextContent();
+      s.append(tag.equals("t") ? decodeText(value) : value);
+    }
     return s.toString();
+  }
+
+  static String decodeText(String value) {
+    Matcher escape = ESCAPED_CHARACTER.matcher(value);
+    if (!escape.find()) return value;
+    StringBuilder decoded = new StringBuilder(value.length());
+    int end = 0;
+    do {
+      decoded.append(value, end, escape.start());
+      decoded.append((char) Integer.parseInt(escape.group(1), 16));
+      end = escape.end();
+    } while (escape.find());
+    return decoded.append(value, end, value.length()).toString();
   }
 
   static Document xml(byte[] b) throws Exception {

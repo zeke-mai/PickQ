@@ -25,7 +25,6 @@ public class MainActivity extends Activity {
   LinearLayout root, body, bar;
   boolean downloading;
   FrameLayout practiceViewport;
-  TextView toolbarTitle;
   final Map<Integer, PracticePage> practicePages = new HashMap<>();
   final Map<String, String> pendingAnswers = new HashMap<>();
   boolean turning, dragging;
@@ -227,7 +226,6 @@ public class MainActivity extends Activity {
     bar.setGravity(Gravity.CENTER_VERTICAL);
     bar.setPadding(0, dp(6), 0, dp(12));
     TextView t = label(title, 22);
-    toolbarTitle = t;
     bar.addView(t, new LinearLayout.LayoutParams(0, -2, 1));
     root.addView(bar);
     ScrollView scroll = new SwipeScroll();
@@ -758,6 +756,7 @@ public class MainActivity extends Activity {
     List<ImportReview.Entry> visible = new ArrayList<>();
     for (ImportReview.Entry entry : previewReport.entries)
       if (!onlyImportIssues.isChecked()
+          || "0".equals(entry.row.get("__include"))
           || !entry.valid()
           || !entry.duplicate.isEmpty()
           || !entry.warnings.isEmpty()) visible.add(entry);
@@ -828,7 +827,12 @@ public class MainActivity extends Activity {
     new AlertDialog.Builder(this)
         .setTitle("题目检查详情")
         .setNeutralButton("修改", (d, w) -> editImportEntry(entry))
-        .setNegativeButton("0".equals(entry.row.get("__include")) ? "选择导入" : "排除此题", (d, w) -> { entry.row.put("__include", "0".equals(entry.row.get("__include")) ? "1" : "0"); refreshImportPreview(); })
+        .setNegativeButton(
+            "0".equals(entry.row.get("__include")) ? "恢复导入" : "排除此题",
+            (d, w) -> {
+              entry.row.put("__include", "0".equals(entry.row.get("__include")) ? "1" : "0");
+              refreshImportPreview();
+            })
         .setView(scroll)
         .setPositiveButton("关闭", null)
         .show();
@@ -841,6 +845,7 @@ public class MainActivity extends Activity {
     for (String key : Arrays.asList("题型", "题干", "选项A", "选项B", "选项C", "选项D", "选项E", "选项F", "选项G", "选项H", "正确答案", "解析", "章节", "难度")) {
       fields.addView(label(key, 14));
       EditText input = new EditText(this);
+      input.setTag(key);
       input.setText(entry.row.getOrDefault(key, ""));
       fields.addView(input);
       inputs.put(key, input);
@@ -1139,6 +1144,7 @@ public class MainActivity extends Activity {
                   }
                 });
         b.setTag(k);
+        b.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
         LinearLayout.LayoutParams optionLayout = new LinearLayout.LayoutParams(-1, -2);
         optionLayout.setMargins(0, dp(5), 0, dp(5));
         front.addView(b, optionLayout);
@@ -1190,7 +1196,7 @@ public class MainActivity extends Activity {
       actions.addView(button(exam ? "保存答案" : "提交答案", () -> submit(q)), new LinearLayout.LayoutParams(0, -2, 1));
     if ((!exam && !answer(q).isEmpty()) || review)
       body.addView(
-          label("参考答案：" + q.optString("answer") + "\n解析：" + q.optString("explanation"), 16));
+          label("参考答案：" + displayedChoice(q, q.optString("answer")) + "\n解析：" + q.optString("explanation"), 16));
 
     draft = previousDraft;
     return new PracticePage(scroll);
@@ -1212,7 +1218,6 @@ public class MainActivity extends Activity {
   void showPracticePage() {
     draft = pendingAnswers.getOrDefault(id(questions.get(index)), answer(questions.get(index)));
     ensurePage(index);
-    toolbarTitle.setText("");
     FrameLayout owner = practiceViewport;
     owner.post(
         () -> {
@@ -1500,27 +1505,45 @@ public class MainActivity extends Activity {
   }
 
   void refreshOptions(LinearLayout front, JSONObject q) {
+    String expectedAnswer = q.optString("answer");
+    boolean showResult = !expectedAnswer.isEmpty() && ((!exam && !answer(q).isEmpty()) || review);
+    int displayedIndex = 0;
     for (int i = 0; i < front.getChildCount(); i++) {
       View v = front.getChildAt(i);
-      if (v.getTag() instanceof String) {
-        String key = (String) v.getTag();
-        boolean selected = draft.contains(key);
-        int c = selected ? 0xffdbe5ff : 0xfff3f5f9;
-        if ((!exam && !answer(q).isEmpty()) || review) {
-          if (q.optString("answer").contains(key)) c = 0xffc9f0db;
-          else if (selected) c = 0xffffd7d7;
+      if (!(v instanceof Button) || !(v.getTag() instanceof String)) continue;
+      Button option = (Button) v;
+      String key = (String) option.getTag();
+      boolean selected = draft.contains(key);
+      int background = selected ? 0xffdbe5ff : 0xfff3f5f9;
+      int foreground = 0xff263650;
+      String marker = selected ? "已选" : "";
+      if (showResult) {
+        if (expectedAnswer.contains(key)) {
+          marker = selected ? "选对" : "漏选";
+          background = selected ? 0xffc9f0db : 0xffffe5b4;
+          foreground = selected ? 0xff14683c : 0xff7c4a00;
+        } else if (selected) {
+          marker = "错选";
+          background = 0xffffd7d7;
+          foreground = 0xffc62828;
         }
-        String marker = selected ? "已选 · " : "";
-        if ((!exam && !answer(q).isEmpty()) || review) {
-          boolean expected = q.optString("answer").contains(key);
-          marker = expected ? (selected ? "选对 · " : "漏选 · ") : (selected ? "错选 · " : "");
-          if (expected && !selected) c = 0xffffe5b4;
-          ((Button) v).setTextColor(selected && !expected ? 0xffc62828 : 0xff263650);
-        }
-        ((Button) v).setText(marker + key + "  " + q.optJSONObject("options").optString(key));
-        v.setBackground(bg(c));
       }
+      char letter = (char) ('A' + displayedIndex++);
+      String content = q.optJSONObject("options").optString(key);
+      option.setText(letter + "  " + content + (marker.isEmpty() ? "" : "  ·  " + marker));
+      option.setTextColor(foreground);
+      option.setBackground(bg(background));
     }
+  }
+
+  String displayedChoice(JSONObject q, String answer) {
+    List<String> order = orders.get(id(q));
+    if (!choice(q) || order == null) return answer;
+    StringBuilder letters = new StringBuilder();
+    for (int i = 0; i < order.size(); i++) {
+      if (answer.contains(order.get(i))) letters.append((char) ('A' + i));
+    }
+    return letters.toString();
   }
 
   void record(JSONObject q, boolean ok) {
@@ -1531,12 +1554,12 @@ public class MainActivity extends Activity {
     saveWhenIdle();
     practice();
     if (ok && prefs.getBoolean("auto", false) && index + 1 < questions.size())
-      new Handler()
+      ui
           .postDelayed(
               () -> {
                 if (screen.equals("practice") && !exam && questions.get(index) == q) move(1);
               },
-              150);
+              100);
   }
 
   void move(int delta) {
@@ -1765,7 +1788,7 @@ public class MainActivity extends Activity {
       new AlertDialog.Builder(this)
           .setCancelable(false)
           .setTitle("主观题人工判分")
-          .setMessage(q.optString("title") + "\n你的答案：" + a + "\n参考：" + q.optString("answer"))
+          .setMessage(q.optString("title") + "\n你的答案：" + displayedChoice(q, a) + "\n参考：" + q.optString("answer"))
           .setPositiveButton("答对", (d, w) -> gradeOne(pos, true, score, total, p))
           .setNegativeButton("答错", (d, w) -> gradeOne(pos, false, score, total, p))
           .show();

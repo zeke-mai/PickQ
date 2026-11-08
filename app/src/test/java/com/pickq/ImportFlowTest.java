@@ -8,6 +8,7 @@ import android.content.*;
 import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Looper;
+import android.widget.EditText;
 import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
@@ -102,6 +103,39 @@ public class ImportFlowTest {
     activity.showImportPreview(
         ImportReview.analyze(Collections.singletonList(row("错误题", "Z"))), "错误");
     assertFalse(activity.importConfirm.isEnabled());
+  }
+
+  @Test
+  public void previewCanEditExcludeAndRestoreAQuestionWithRepeatedOptions() throws Exception {
+    Map<String, String> question = row("重复选项题", "AZ");
+    question.put("题型", "多选题");
+    question.put("选项B", "甲");
+    activity.showImportPreview(ImportReview.analyze(Collections.singletonList(question)), "待修正");
+    activity.onlyImportIssues.setChecked(true);
+    assertFalse(activity.importConfirm.isEnabled());
+
+    activity.importList.performItemClick(null, 0, 0);
+    ShadowAlertDialog.getLatestAlertDialog().getButton(AlertDialog.BUTTON_NEUTRAL).performClick();
+    shadowOf(Looper.getMainLooper()).idle();
+    AlertDialog editor = ShadowAlertDialog.getLatestAlertDialog();
+    EditText answer = editor.getWindow().getDecorView().findViewWithTag("正确答案");
+    answer.setText("AB");
+    editor.getButton(AlertDialog.BUTTON_POSITIVE).performClick();
+    shadowOf(Looper.getMainLooper()).idle();
+    assertEquals(0, activity.previewReport.errors);
+    assertEquals(1, activity.previewReport.warnings);
+    assertTrue(activity.importConfirm.isEnabled());
+
+    for (boolean included : new boolean[] {false, true}) {
+      activity.importList.performItemClick(null, 0, 0);
+      ShadowAlertDialog.getLatestAlertDialog().getButton(AlertDialog.BUTTON_NEGATIVE).performClick();
+      shadowOf(Looper.getMainLooper()).idle();
+      assertEquals(included, activity.importConfirm.isEnabled());
+    }
+    activity.importConfirm.performClick();
+    JSONObject imported = activity.banks.getJSONObject(0).getJSONArray("questions").getJSONObject(0);
+    assertEquals("AB", imported.getString("answer"));
+    assertEquals("甲", imported.getJSONObject("options").getString("B"));
   }
 
   @Test
