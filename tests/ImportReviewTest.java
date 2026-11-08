@@ -35,6 +35,12 @@ public final class ImportReviewTest {
     check(report.duplicates == 1, "Reordered options and whitespace are duplicates");
     check(report.selected(true).size() == 3, "Default skip invalid and repeats");
     check(report.selected(false).size() == 4, "Can retain duplicates but never invalid questions");
+    report.entries.get(0).row.put("__include", "0");
+    check(report.selected(true).get(0) == report.entries.get(1), "Keep the first included duplicate");
+    report.entries.get(1).row.put("__include", "0");
+    check(report.selected(true).size() == 2, "All copies can be excluded explicitly");
+    report.entries.get(0).row.put("__include", "1");
+    check(report.selected(true).get(0) == report.entries.get(0), "Reincluding restores the first copy");
     check(
         report.entries.get(5).warnings.size() == 1,
         "Same stem with conflicting answer requires review");
@@ -59,6 +65,13 @@ public final class ImportReviewTest {
     dupOptions.put("选项B", "甲");
     check(ImportReview.check(dupOptions).valid(), "Duplicate options are allowed");
     check(!ImportReview.check(dupOptions).warnings.isEmpty(), "Duplicate options have a warning");
+    Map<String, String> sameLabelsOtherAnswer = new HashMap<>(dupOptions);
+    sameLabelsOtherAnswer.put("正确答案", "B");
+    ImportReview.Report repeatedLabels =
+        ImportReview.analyze(Arrays.asList(dupOptions, sameLabelsOtherAnswer, dupOptions));
+    check(repeatedLabels.duplicates == 1, "Only the copy with the same answer letter is duplicate");
+    check(repeatedLabels.selected(true).equals(repeatedLabels.entries.subList(0, 2)),
+        "Keep both answer letters when their option labels match");
     dupOptions.put("__include", "0");
     check(ImportReview.analyze(Arrays.asList(dupOptions)).selected(false).isEmpty(), "Excluded question is skipped");
     Map<String, String> sorted = row("排序", "排序题", "AA");

@@ -15,6 +15,7 @@ public final class ImportReview {
     public final Map<String, String> row;
     public final List<String> errors = new ArrayList<>(), warnings = new ArrayList<>();
     public String duplicate = "";
+    private String fingerprint;
 
     Entry(Map<String, String> source) {
       row = new HashMap<>(source);
@@ -52,8 +53,11 @@ public final class ImportReview {
 
     public List<Entry> selected(boolean skipDuplicates) {
       List<Entry> rows = new ArrayList<>();
+      Set<String> included = new HashSet<>();
       for (Entry e : entries)
-        if (!"0".equals(e.row.get("__include")) && e.valid() && (!skipDuplicates || e.duplicate.isEmpty())) rows.add(e);
+        if (!"0".equals(e.row.get("__include"))
+            && e.valid()
+            && (!skipDuplicates || included.add(e.fingerprint))) rows.add(e);
       return rows;
     }
   }
@@ -68,7 +72,8 @@ public final class ImportReview {
       e.row.putIfAbsent("__row", "" + (++sequence));
       e.row.putIfAbsent("__sheet", "题库");
       if (e.valid()) {
-        String key = fingerprint(e.row), title = stem(e.row);
+        String key = e.fingerprint = fingerprint(e.row);
+        String title = stem(e.row);
         if (exact.containsKey(key)) e.duplicate = "与 " + exact.get(key) + " 完全重复";
         else {
           if (stems.contains(title)) e.warnings.add("存在相同题干，但选项或答案不同，请核对");
@@ -188,15 +193,26 @@ public final class ImportReview {
     parts.add(type);
     parts.add(row.getOrDefault("题干", ""));
     List<String> options = new ArrayList<>(), answers = new ArrayList<>();
-    for (char c = 'A'; c <= 'H'; c++)
-      if (!row.getOrDefault("选项" + c, "").isEmpty()) options.add(normal(row.get("选项" + c)));
     String answer = row.getOrDefault("正确答案", "");
     if (type.contains("选") || type.equals("判断题") || type.equals("排序题")) {
-      for (char c : answer.toCharArray()) answers.add(normal(row.getOrDefault("选项" + c, "")));
+      Map<Character, String> byLetter = new LinkedHashMap<>();
+      for (char c = 'A'; c <= 'H'; c++) {
+        String value = row.getOrDefault("选项" + c, "");
+        if (!value.isEmpty()) byLetter.put(c, normal(value));
+      }
+      boolean ambiguous = new HashSet<>(byLetter.values()).size() < byLetter.size();
+      if (ambiguous) {
+        // Identical labels cannot identify which option is correct. Keep the letter mapping.
+        byLetter.forEach((letter, value) -> options.add(letter + ":" + value));
+        for (char c : answer.toCharArray()) answers.add(String.valueOf(c));
+      } else {
+        options.addAll(byLetter.values());
+        Collections.sort(options);
+        for (char c : answer.toCharArray()) answers.add(byLetter.get(c));
+      }
+      parts.add(ambiguous ? "by-letter" : "by-text");
       if (!type.equals("排序题")) Collections.sort(answers);
-      Collections.sort(options);
     } else answers.add(normal(answer));
-    if (!(type.contains("选") || type.equals("判断题") || type.equals("排序题"))) options.clear();
     parts.add("options:" + options.size());
     parts.addAll(options);
     parts.add("answers:" + answers.size());
