@@ -44,6 +44,7 @@ public final class ExcelImporter {
   static List<Map<String, String>> readXls(byte[] data, boolean tolerant) throws Exception {
     WorkbookSettings settings = new WorkbookSettings();
     settings.setSuppressWarnings(true);
+    settings.setEncoding("Cp1252");
     settings.setGCDisabled(true);
     Workbook workbook = Workbook.getWorkbook(new ByteArrayInputStream(data), settings);
     List<Map<String, String>> result = new ArrayList<>();

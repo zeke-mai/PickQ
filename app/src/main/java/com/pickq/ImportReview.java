@@ -53,7 +53,7 @@ public final class ImportReview {
     public List<Entry> selected(boolean skipDuplicates) {
       List<Entry> rows = new ArrayList<>();
       for (Entry e : entries)
-        if (e.valid() && (!skipDuplicates || e.duplicate.isEmpty())) rows.add(e);
+        if (!"0".equals(e.row.get("__include")) && e.valid() && (!skipDuplicates || e.duplicate.isEmpty())) rows.add(e);
       return rows;
     }
   }
@@ -132,7 +132,7 @@ public final class ImportReview {
     if (choice || sorted) {
       if (options.size() < 2) e.errors.add("至少需要两个非空选项");
       Set<String> texts = new HashSet<>();
-      for (String text : options.values()) if (!texts.add(normal(text))) e.errors.add("存在内容相同的选项");
+      for (String text : options.values()) if (!texts.add(normal(text))) e.warnings.add("存在内容相同的选项，请核对");
       answer = letters(answer);
       if (!answer.isEmpty()) {
         Set<Character> used = new HashSet<>(),

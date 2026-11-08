@@ -729,7 +729,7 @@ public class MainActivity extends Activity {
                 + " · 提示 "
                 + report.warnings,
             14));
-    TextView rules = label("点击题目查看检查详情；格式错误题不会导入。缺少标准答案的题将以人工判分方式导入。", 12);
+    TextView rules = label("点击题目可修改或排除；未修正的格式错误题不会导入。缺少标准答案的题将以人工判分方式导入。", 12);
     rules.setTextColor(0xff6e7b93);
     content.addView(rules);
     skipImportDuplicates = new CheckBox(this);
@@ -787,7 +787,7 @@ public class MainActivity extends Activity {
                         ? entry.duplicate
                         : !entry.warnings.isEmpty() ? entry.warnings.get(0) : entry.row.get("题型");
             view.setText(
-                entry.status()
+                ("0".equals(entry.row.get("__include")) ? "已排除 · " : "") + entry.status()
                     + " · "
                     + entry.location()
                     + "\n"
@@ -827,9 +827,38 @@ public class MainActivity extends Activity {
     scroll.addView(label(detail.toString(), 16));
     new AlertDialog.Builder(this)
         .setTitle("题目检查详情")
+        .setNeutralButton("修改", (d, w) -> editImportEntry(entry))
+        .setNegativeButton("0".equals(entry.row.get("__include")) ? "选择导入" : "排除此题", (d, w) -> { entry.row.put("__include", "0".equals(entry.row.get("__include")) ? "1" : "0"); refreshImportPreview(); })
         .setView(scroll)
         .setPositiveButton("关闭", null)
         .show();
+  }
+
+  void editImportEntry(ImportReview.Entry entry) {
+    LinearLayout fields = new LinearLayout(this);
+    fields.setOrientation(LinearLayout.VERTICAL);
+    Map<String, EditText> inputs = new LinkedHashMap<>();
+    for (String key : Arrays.asList("题型", "题干", "选项A", "选项B", "选项C", "选项D", "选项E", "选项F", "选项G", "选项H", "正确答案", "解析", "章节", "难度")) {
+      fields.addView(label(key, 14));
+      EditText input = new EditText(this);
+      input.setText(entry.row.getOrDefault(key, ""));
+      fields.addView(input);
+      inputs.put(key, input);
+    }
+    ScrollView scroll = new ScrollView(this);
+    scroll.addView(fields);
+    new AlertDialog.Builder(this).setTitle("修改导入题目").setView(scroll)
+      .setNegativeButton("取消", null).setPositiveButton("保存并重新检查", (d, w) -> {
+        for (Map.Entry<String, EditText> field : inputs.entrySet()) entry.row.put(field.getKey(), field.getValue().getText().toString());
+        entry.row.remove("__error");
+        entry.row.remove("__typeMissing");
+        List<Map<String, String>> rows = new ArrayList<>();
+        for (ImportReview.Entry item : previewReport.entries) rows.add(item.row);
+        boolean skip = skipImportDuplicates.isChecked(), issues = onlyImportIssues.isChecked();
+        showImportPreview(ImportReview.analyze(rows), importName.getText().toString());
+        skipImportDuplicates.setChecked(skip);
+        onlyImportIssues.setChecked(issues);
+      }).show();
   }
 
   JSONObject importedQuestion(Map<String, String> row) {
@@ -906,11 +935,15 @@ public class MainActivity extends Activity {
     bar.getChildAt(0).setContentDescription("返回主界面");
     bar.addView(button("⋮", () -> bankSettings()));
     card("顺序练习", "继续上次进度 · 即时解析", () -> start(false));
+    card("随机练习", "随机排列全部题目", () -> start(false, true));
     card("模拟考试", "按题型抽题 · 交卷后查看答案", () -> examSetup());
     card("错题集", "查看累计错题与错误次数", () -> wrongPage());
   }
 
-  void start(boolean wrong) {
+  boolean randomPractice;
+  void start(boolean wrong) { start(wrong, false); }
+  void start(boolean wrong, boolean random) {
+    randomPractice = random;
     questions.clear();
     JSONArray qs = bank.optJSONArray("questions");
     for (int i = 0; i < qs.length(); i++) {
@@ -932,6 +965,7 @@ public class MainActivity extends Activity {
                 Math.min(
                     prefs.getInt("position:" + bank.optString("id"), bank.optInt("position")),
                     questions.size() - 1));
+    if (random) { Collections.shuffle(questions); index = 0; }
     pendingAnswers.clear();
     practice();
   }
@@ -1068,6 +1102,10 @@ public class MainActivity extends Activity {
     front.addView(label(q.optString("title"), 21));
     stage.addView(front, new FrameLayout.LayoutParams(-1, -2));
     body.addView(stage);
+    LinearLayout actions = new LinearLayout(this);
+    actions.setGravity(Gravity.CENTER_VERTICAL);
+    body.addView(actions);
+    CheckBox selectAll = new CheckBox(this);
     if (choice(q)) {
       JSONObject opts = q.optJSONObject("options");
       List<String> keys = orders.get(id(q));
@@ -1087,6 +1125,7 @@ public class MainActivity extends Activity {
                     draft = draft.contains(k) ? draft.replace(k, "") : draft + k;
                   } else draft = k;
                   pendingAnswers.put(id(q), draft);
+                  selectAll.setChecked(draft.length() == opts.length());
                   if (exam) {
                     examAnswers.put(id(q), draft);
                     updateProgress();
@@ -1106,19 +1145,19 @@ public class MainActivity extends Activity {
       }
       refreshOptions(front, q);
       if (multiple(q) && !review) {
-        front.addView(
-            button(
-                "全选",
-                () -> {
-                  if (!exam && !answer(q).isEmpty()) return;
-                  StringBuilder all = new StringBuilder();
-                  for (char k = 'A'; k <= 'H'; k++) if (opts.has("" + k)) all.append(k);
-                  draft = all.toString();
-                  pendingAnswers.put(id(q), draft);
-                  if (exam) examAnswers.put(id(q), draft);
-                  refreshOptions(front, q);
-                  updateProgress();
-                }));
+        selectAll.setText("全选");
+        selectAll.setChecked(draft.length() == opts.length());
+        selectAll.setEnabled(exam || answer(q).isEmpty());
+        actions.addView(selectAll);
+        selectAll.setOnClickListener(v -> {
+          StringBuilder all = new StringBuilder();
+          for (char k = 'A'; k <= 'H'; k++) if (opts.has("" + k)) all.append(k);
+          draft = selectAll.isChecked() ? all.toString() : "";
+          pendingAnswers.put(id(q), draft);
+          if (exam) examAnswers.put(id(q), draft);
+          refreshOptions(front, q);
+          updateProgress();
+        });
       }
     } else {
       EditText e = new EditText(this);
@@ -1148,7 +1187,7 @@ public class MainActivity extends Activity {
       front.addView(e);
     }
     if (!review && (!choice(q) || multiple(q)))
-      body.addView(button(exam ? "保存答案" : "提交答案", () -> submit(q)));
+      actions.addView(button(exam ? "保存答案" : "提交答案", () -> submit(q)), new LinearLayout.LayoutParams(0, -2, 1));
     if ((!exam && !answer(q).isEmpty()) || review)
       body.addView(
           label("参考答案：" + q.optString("answer") + "\n解析：" + q.optString("explanation"), 16));
@@ -1173,7 +1212,7 @@ public class MainActivity extends Activity {
   void showPracticePage() {
     draft = pendingAnswers.getOrDefault(id(questions.get(index)), answer(questions.get(index)));
     ensurePage(index);
-    toolbarTitle.setText((exam ? "模拟考试" : "顺序练习") + "  " + (index + 1) + "/" + questions.size());
+    toolbarTitle.setText("");
     FrameLayout owner = practiceViewport;
     owner.post(
         () -> {
@@ -1263,7 +1302,7 @@ public class MainActivity extends Activity {
                   || !screen.equals("practice")) return;
               turning = false;
               index = from + direction;
-              if (direction != 0 && !exam) {
+              if (direction != 0 && !exam && !randomPractice) {
                 put(bank, "position", index);
                 prefs.edit().putInt("position:" + bank.optString("id"), index).apply();
               }
@@ -1471,6 +1510,14 @@ public class MainActivity extends Activity {
           if (q.optString("answer").contains(key)) c = 0xffc9f0db;
           else if (selected) c = 0xffffd7d7;
         }
+        String marker = selected ? "已选 · " : "";
+        if ((!exam && !answer(q).isEmpty()) || review) {
+          boolean expected = q.optString("answer").contains(key);
+          marker = expected ? (selected ? "选对 · " : "漏选 · ") : (selected ? "错选 · " : "");
+          if (expected && !selected) c = 0xffffe5b4;
+          ((Button) v).setTextColor(selected && !expected ? 0xffc62828 : 0xff263650);
+        }
+        ((Button) v).setText(marker + key + "  " + q.optJSONObject("options").optString(key));
         v.setBackground(bg(c));
       }
     }
@@ -1489,7 +1536,7 @@ public class MainActivity extends Activity {
               () -> {
                 if (screen.equals("practice") && !exam && questions.get(index) == q) move(1);
               },
-              400);
+              150);
   }
 
   void move(int delta) {

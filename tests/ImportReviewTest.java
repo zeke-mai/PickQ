@@ -57,7 +57,10 @@ public final class ImportReviewTest {
     check(!ImportReview.check(row("单个答案", "多选题", "A")).valid(), "Multi type needs two answers");
     Map<String, String> dupOptions = row("重复选项", "单选题", "A");
     dupOptions.put("选项B", "甲");
-    check(!ImportReview.check(dupOptions).valid(), "Duplicate option content");
+    check(ImportReview.check(dupOptions).valid(), "Duplicate options are allowed");
+    check(!ImportReview.check(dupOptions).warnings.isEmpty(), "Duplicate options have a warning");
+    dupOptions.put("__include", "0");
+    check(ImportReview.analyze(Arrays.asList(dupOptions)).selected(false).isEmpty(), "Excluded question is skipped");
     Map<String, String> sorted = row("排序", "排序题", "AA");
     check(!ImportReview.check(sorted).valid(), "Invalid sorting answers");
     Map<String, String> orphan = row("(1)", "单选题", "A");
