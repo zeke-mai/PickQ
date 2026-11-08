@@ -4,13 +4,16 @@ import static org.junit.Assert.*;
 import static org.robolectric.Shadows.shadowOf;
 
 import android.app.AlertDialog;
+import android.graphics.drawable.GradientDrawable;
 import android.os.Looper;
 import android.view.Gravity;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.FrameLayout;
+import android.widget.GridView;
 import android.widget.TextView;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -183,11 +186,73 @@ public class InteractionTest {
     page.layout(0, 0, page.getMeasuredWidth(), page.getMeasuredHeight());
     View all = withText(page, "全选");
     Button submit = (Button) withText(page, "提交答案");
-    assertTrue(submit.getLeft() - all.getRight() >= activity.dp(32));
-    assertEquals(((View) submit.getParent()).getWidth(), submit.getRight());
+    View row = (View) submit.getParent();
+    assertEquals(row.getWidth(), submit.getLeft() + submit.getRight(), 1);
+    assertTrue(all.getRight() <= submit.getLeft());
+    assertTrue(submit.getTop() >= activity.dp(8));
+    assertTrue(row.getHeight() - submit.getBottom() >= activity.dp(8));
     assertEquals(1, submit.getLineCount());
     assertEquals(0, submit.getLayout().getEllipsisCount(0));
     assertTrue(submit.getLayout().getLineWidth(0) <= submit.getLayout().getWidth());
+  }
+
+  GridView overviewNumbers() {
+    View close = withText(activity.questionOverview.getWindow().getDecorView(), "关闭");
+    return (GridView) ((ViewGroup) close.getParent().getParent()).getChildAt(2);
+  }
+
+  @Test
+  public void overviewShowsHalfScreenAnswerStatesAndJumpsDirectly() throws Exception {
+    JSONArray questions = activity.bank.getJSONArray("questions");
+    questions.getJSONObject(0).put("response", "AB").put("right", true);
+    questions.getJSONObject(1).put("response", "A").put("right", false);
+    activity.start(false);
+    layout();
+    withText(activity.resultBar, "题号总览").performClick();
+    assertTrue(activity.questionOverview.isShowing());
+    assertEquals(
+        activity.dp(activity.getResources().getConfiguration().screenHeightDp) / 2,
+        activity.questionOverview.getWindow().getAttributes().height);
+    GridView numbers = overviewNumbers();
+    assertEquals(4, numbers.getCount());
+    View correct = numbers.getAdapter().getView(0, null, numbers);
+    View wrong = numbers.getAdapter().getView(1, null, numbers);
+    View unanswered = numbers.getAdapter().getView(2, null, numbers);
+    assertEquals("第 1 题，答对，当前题", correct.getContentDescription());
+    assertEquals("第 2 题，答错", wrong.getContentDescription());
+    assertEquals("第 3 题，未答", unanswered.getContentDescription());
+    assertEquals(0xffc9f0db, ((GradientDrawable) correct.getBackground()).getColor().getDefaultColor());
+    assertEquals(0xffffd7d7, ((GradientDrawable) wrong.getBackground()).getColor().getDefaultColor());
+    assertEquals(0xffedf0f5, ((GradientDrawable) unanswered.getBackground()).getColor().getDefaultColor());
+    numbers.performItemClick(null, 3, 3);
+    settle();
+    assertNull(activity.questionOverview);
+    assertEquals(3, activity.index);
+    assertEquals(3, activity.prefs.getInt("position:fixture", -1));
+    assertNotNull(withText(activity.practicePages.get(3).view, "4. Question 3"));
+    assertTrue(activity.practicePages.size() <= 3);
+  }
+
+  @Test
+  public void footerSwipeOpensOverviewWithoutRevealingExamResults() {
+    activity.start(false);
+    activity.exam = true;
+    activity.examAnswers.put("q0", "A");
+    activity.practice();
+    layout();
+    long time = android.os.SystemClock.uptimeMillis();
+    MotionEvent down = MotionEvent.obtain(time, time, MotionEvent.ACTION_DOWN, 10, activity.dp(42), 0);
+    MotionEvent up = MotionEvent.obtain(time, time + 40, MotionEvent.ACTION_UP, 10, activity.dp(4), 0);
+    activity.resultBar.dispatchTouchEvent(down);
+    activity.resultBar.dispatchTouchEvent(up);
+    down.recycle();
+    up.recycle();
+    assertTrue(activity.questionOverview.isShowing());
+    GridView numbers = overviewNumbers();
+    View answered = numbers.getAdapter().getView(0, null, numbers);
+    assertEquals("第 1 题，已作答，当前题", answered.getContentDescription());
+    assertEquals(0xffdbe5ff, ((GradientDrawable) answered.getBackground()).getColor().getDefaultColor());
+    activity.questionOverview.dismiss();
   }
 
   @Test
@@ -408,10 +473,10 @@ public class InteractionTest {
     activity.exam = true;
     activity.practice();
     layout();
-    assertEquals(4, activity.resultBar.getChildCount());
+    assertEquals(5, activity.resultBar.getChildCount());
     activity.review = true;
     activity.practice();
     layout();
-    assertEquals(3, activity.resultBar.getChildCount());
+    assertEquals(4, activity.resultBar.getChildCount());
   }
 }

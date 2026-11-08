@@ -44,6 +44,7 @@ public class MainActivity extends Activity {
 
   TextView progressLabel;
   LinearLayout resultBar;
+  Dialog questionOverview;
   long importGeneration;
   Uri pendingImportUri;
   ProgressDialog importProgress;
@@ -219,6 +220,7 @@ public class MainActivity extends Activity {
   }
 
   void shell(String title) {
+    if (questionOverview != null) questionOverview.dismiss();
     pageRevision++;
     practiceViewport = null;
     practicePages.clear();
@@ -1058,12 +1060,16 @@ public class MainActivity extends Activity {
       View divider = new View(this);
       divider.setBackgroundColor(0xffcbd5e1);
       root.addView(divider, new LinearLayout.LayoutParams(-1, dp(2)));
-      resultBar = new LinearLayout(this);
+      resultBar = new PracticeFooter();
       resultBar.setGravity(Gravity.CENTER_VERTICAL);
       resultBar.setBackground(bg(Color.WHITE));
       resultBar.setPadding(dp(8), dp(10), dp(8), dp(10));
       root.addView(resultBar);
       updateProgress();
+      Button overview = button("题号总览", this::showQuestionOverview);
+      overview.setTextSize(13);
+      overview.setPadding(dp(8), dp(4), dp(8), dp(4));
+      resultBar.addView(overview);
       if (exam && !review)
         resultBar.addView(
             button(
@@ -1210,11 +1216,19 @@ public class MainActivity extends Activity {
     if (!review && (!choice(q) || multiple(q))) {
       Button submit = button(exam ? "保存答案" : "提交答案", () -> submit(q));
       submit.setSingleLine(false);
+      GradientDrawable surface = bg(0xffeaf0ff);
+      surface.setStroke(dp(1), 0xffa3b8f4);
+      submit.setBackground(new android.graphics.drawable.RippleDrawable(
+          android.content.res.ColorStateList.valueOf(0x22315cdb), surface, null));
+      submit.setStateListAnimator(null);
       submit.setPadding(dp(12), dp(8), dp(12), dp(8));
       submit.setMinWidth(dp(108));
       submit.setMinimumWidth(dp(108));
-      if (multiple(q)) actions.addView(new Space(this), new LinearLayout.LayoutParams(0, 1, 1));
+      actions.setGravity(Gravity.CENTER);
+      actions.setPadding(0, dp(8), 0, dp(8));
+      if (multiple(q)) selectAll.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1));
       actions.addView(submit, new LinearLayout.LayoutParams(-2, -2));
+      if (multiple(q)) actions.addView(new Space(this), new LinearLayout.LayoutParams(0, 1, 1));
     }
     if ((!exam && !answer(q).isEmpty()) || review)
       body.addView(
@@ -1294,11 +1308,22 @@ public class MainActivity extends Activity {
     }
   }
 
+  void rememberCurrentDraft() {
+    String questionId = id(questions.get(index));
+    pendingAnswers.put(questionId, draft);
+    if (exam && !review) examAnswers.put(questionId, draft);
+  }
+
+  void savePracticePosition() {
+    if (exam || practicePositionKey == null) return;
+    if (!randomPractice) put(bank, "position", index);
+    prefs.edit().putInt(practicePositionKey, index).apply();
+  }
+
   void settlePages(int delta) {
     if (turning || practiceViewport == null) return;
     if (index + delta < 0 || index + delta >= questions.size()) delta = 0;
-    pendingAnswers.put(id(questions.get(index)), draft);
-    if (exam && !review) examAnswers.put(id(questions.get(index)), draft);
+    rememberCurrentDraft();
     final int direction = delta;
     ensurePage(index + direction);
     final int from = index;
@@ -1329,10 +1354,7 @@ public class MainActivity extends Activity {
                   || !screen.equals("practice")) return;
               turning = false;
               index = from + direction;
-              if (direction != 0 && !exam && practicePositionKey != null) {
-                if (!randomPractice) put(bank, "position", index);
-                prefs.edit().putInt(practicePositionKey, index).apply();
-              }
+              if (direction != 0) savePracticePosition();
               showPracticePage();
             });
   }
@@ -1362,7 +1384,7 @@ public class MainActivity extends Activity {
 
   void updateProgress() {
     if (resultBar == null || !screen.equals("practice")) return;
-    // Keep the exam submit button while updating the counters in place.
+    // Keep the overview and exam controls while updating the counters in place.
     if (resultBar.getChildCount() >= 3) {
       resultBar.removeViews(0, 3);
     }
@@ -1373,17 +1395,125 @@ public class MainActivity extends Activity {
     }
     boolean hidden = exam && !review;
     TextView yes = label("  " + (hidden ? "—" : right), 14);
+    yes.setPadding(dp(2), 0, dp(4), 0);
     yes.setCompoundDrawablesWithIntrinsicBounds(new ResultIcon(true), null, null, null);
     yes.setTextColor(0xff16834a);
     yes.setContentDescription(hidden ? "交卷后显示答对数量" : "答对 " + right + " 题");
     TextView no = label("  " + (hidden ? "—" : (done - right)), 14);
+    no.setPadding(dp(2), 0, dp(4), 0);
     no.setCompoundDrawablesWithIntrinsicBounds(new ResultIcon(false), null, null, null);
     no.setTextColor(0xffd33443);
     no.setContentDescription(hidden ? "交卷后显示答错数量" : "答错 " + (done - right) + " 题");
     resultBar.addView(yes, 0);
     resultBar.addView(no, 1);
     progressLabel = label("已做 " + done + "/" + questions.size(), 14);
+    progressLabel.setPadding(dp(4), 0, dp(4), 0);
     resultBar.addView(progressLabel, 2, new LinearLayout.LayoutParams(0, -2, 1));
+  }
+
+  final class PracticeFooter extends LinearLayout {
+    float downX, downY;
+    boolean tracking;
+
+    PracticeFooter() {
+      super(MainActivity.this);
+    }
+
+    @Override
+    public boolean dispatchTouchEvent(MotionEvent event) {
+      int action = event.getActionMasked();
+      if (action == MotionEvent.ACTION_DOWN) {
+        downX = event.getRawX();
+        downY = event.getRawY();
+        tracking = true;
+      } else if (action == MotionEvent.ACTION_UP && tracking) {
+        tracking = false;
+        float rise = downY - event.getRawY();
+        if (rise >= dp(24) && rise > Math.abs(event.getRawX() - downX)) {
+          MotionEvent cancel = MotionEvent.obtain(event);
+          cancel.setAction(MotionEvent.ACTION_CANCEL);
+          super.dispatchTouchEvent(cancel);
+          cancel.recycle();
+          showQuestionOverview();
+          return true;
+        }
+      } else if (action == MotionEvent.ACTION_CANCEL || action == MotionEvent.ACTION_POINTER_DOWN) {
+        tracking = false;
+      }
+      return super.dispatchTouchEvent(event) || action == MotionEvent.ACTION_DOWN;
+    }
+  }
+
+  void showQuestionOverview() {
+    if (!screen.equals("practice") || questions.isEmpty() || questionOverview != null) return;
+    Dialog sheet = new Dialog(this);
+    sheet.requestWindowFeature(Window.FEATURE_NO_TITLE);
+    LinearLayout content = new LinearLayout(this);
+    content.setOrientation(LinearLayout.VERTICAL);
+    content.setPadding(dp(12), dp(8), dp(12), dp(8));
+    content.setBackground(bg(Color.WHITE));
+    LinearLayout heading = new LinearLayout(this);
+    heading.setGravity(Gravity.CENTER_VERTICAL);
+    heading.addView(label("题号总览", 18), new LinearLayout.LayoutParams(0, -2, 1));
+    heading.addView(button("关闭", sheet::dismiss));
+    content.addView(heading);
+    boolean ungradedExam = exam && !review;
+    content.addView(label(ungradedExam ? "蓝色已作答 · 灰色未答" : "绿色答对 · 红色答错 · 灰色未答", 13));
+
+    GridView numbers = new GridView(this);
+    numbers.setNumColumns(GridView.AUTO_FIT);
+    numbers.setColumnWidth(dp(48));
+    numbers.setHorizontalSpacing(dp(6));
+    numbers.setVerticalSpacing(dp(6));
+    numbers.setStretchMode(GridView.STRETCH_COLUMN_WIDTH);
+    numbers.setAdapter(new BaseAdapter() {
+      public int getCount() { return questions.size(); }
+      public Object getItem(int position) { return questions.get(position); }
+      public long getItemId(int position) { return position; }
+
+      public View getView(int position, View recycled, ViewGroup parent) {
+        TextView number = recycled instanceof TextView ? (TextView) recycled : new TextView(MainActivity.this);
+        JSONObject q = questions.get(position);
+        boolean answered = !answer(q).isEmpty();
+        boolean correct = q.optBoolean(exam ? "examRight" : rightKey());
+        int color = 0xffedf0f5;
+        String status = "未答";
+        if (answered) {
+          color = ungradedExam ? 0xffdbe5ff : correct ? 0xffc9f0db : 0xffffd7d7;
+          status = ungradedExam ? "已作答" : correct ? "答对" : "答错";
+        }
+        GradientDrawable tile = bg(color);
+        if (position == index) tile.setStroke(dp(2), 0xff315cdb);
+        number.setBackground(tile);
+        number.setGravity(Gravity.CENTER);
+        number.setTextColor(0xff263650);
+        number.setTextSize(15);
+        number.setText(String.valueOf(position + 1));
+        number.setContentDescription("第 " + (position + 1) + " 题，" + status + (position == index ? "，当前题" : ""));
+        number.setLayoutParams(new AbsListView.LayoutParams(-1, dp(48)));
+        return number;
+      }
+    });
+    numbers.setOnItemClickListener((parent, view, position, id) -> {
+      sheet.dismiss();
+      if (!screen.equals("practice") || position == index) return;
+      rememberCurrentDraft();
+      index = position;
+      savePracticePosition();
+      practice();
+    });
+    content.addView(numbers, new LinearLayout.LayoutParams(-1, 0, 1));
+    sheet.setContentView(content);
+    sheet.setOnDismissListener(dialog -> {
+      if (questionOverview == sheet) questionOverview = null;
+    });
+    questionOverview = sheet;
+    Window window = sheet.getWindow();
+    window.setBackgroundDrawableResource(android.R.color.transparent);
+    window.setGravity(Gravity.BOTTOM);
+    sheet.show();
+    window.setLayout(-1, dp(getResources().getConfiguration().screenHeightDp) / 2);
+    numbers.setSelection(index);
   }
 
   final class ResultIcon extends android.graphics.drawable.Drawable {
@@ -1584,7 +1714,8 @@ public class MainActivity extends Activity {
       ui
           .postDelayed(
               () -> {
-                if (screen.equals("practice") && !exam && questions.get(index) == q) move(1);
+                if (screen.equals("practice") && !exam && questionOverview == null && questions.get(index) == q)
+                  move(1);
               },
               100);
   }
@@ -1594,8 +1725,6 @@ public class MainActivity extends Activity {
         || !screen.equals("practice")
         || index + delta < 0
         || index + delta >= questions.size()) return;
-    pendingAnswers.put(id(questions.get(index)), draft);
-    if (exam && !review) examAnswers.put(id(questions.get(index)), draft);
     settlePages(delta);
   }
 
