@@ -17,7 +17,7 @@ public class ImportReaderTest {
     try (ZipOutputStream zip = new ZipOutputStream(bytes)) {
       String[][] files = {
         {"xl/worksheets/sheet1.xml", sheet},
-        {"xl/sharedStrings.xml", "<sst><si><t>_x00b1_2 ℃</t></si></sst>"},
+        {"xl/sharedStrings.xml", "<sst><si><t>_xF0B1_2 ℃</t></si></sst>"},
         {
           "xl/workbook.xml",
           "<workbook"
@@ -56,7 +56,7 @@ public class ImportReaderTest {
             + cell("D7", "甲")
             + cell("E7", "乙")
             + "</row><row r='8'>"
-            + cell("A8", "公差 ±1 或 _x00B1_2，字面量 _x005F_x00B1_")
+            + cell("A8", "公差 Â±1 或 _x00B1_2，字面量 _x005F_x00B1_")
             + cell("B8", "单选题")
             + cell("C8", "A")
             + "<c r='D8' t='s'><v>0</v></c>"

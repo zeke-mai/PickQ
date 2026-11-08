@@ -121,6 +121,10 @@ public class InteractionTest {
     TextView title = (TextView) withText(page, "1. Question 0");
     assertNotNull(badge.getBackground());
     assertSame(badge.getParent(), title.getParent());
+    android.widget.LinearLayout questionCard = (android.widget.LinearLayout) badge.getParent();
+    assertEquals(android.widget.LinearLayout.VERTICAL, questionCard.getOrientation());
+    assertEquals(0, questionCard.indexOfChild(badge));
+    assertEquals(1, questionCard.indexOfChild(title));
     assertNull(withText(page, "多选题 · 不显示的章节"));
     assertEquals(
         android.util.TypedValue.applyDimension(
@@ -145,6 +149,28 @@ public class InteractionTest {
     assertEquals(0xffc62828, ((Button) page.findViewWithTag("C")).getCurrentTextColor());
     assertEquals("CA", question.getString("response"));
     assertFalse(question.getBoolean("right"));
+  }
+
+  @Test
+  public void singleChoiceUsesGreenForCorrectAndRedForWrongWithoutOptionMarkers() throws Exception {
+    JSONObject question = activity.bank.getJSONArray("questions").getJSONObject(0);
+    question.put("type", "单选题").put("answer", "A");
+    activity.start(false);
+    View page = activity.practicePages.get(0).view;
+    page.findViewWithTag("B").performClick();
+    page = activity.practicePages.get(0).view;
+    Button correct = page.findViewWithTag("A"), wrong = page.findViewWithTag("B");
+    assertEquals("A  One", correct.getText().toString());
+    assertEquals("B  Two", wrong.getText().toString());
+    assertEquals(0xffc9f0db, ((android.graphics.drawable.GradientDrawable) correct.getBackground()).getColor().getDefaultColor());
+    assertEquals(0xffffd7d7, ((android.graphics.drawable.GradientDrawable) wrong.getBackground()).getColor().getDefaultColor());
+
+    question.remove("response");
+    activity.practice();
+    activity.practicePages.get(0).view.findViewWithTag("A").performClick();
+    correct = activity.practicePages.get(0).view.findViewWithTag("A");
+    assertEquals("A  One", correct.getText().toString());
+    assertEquals(0xffc9f0db, ((android.graphics.drawable.GradientDrawable) correct.getBackground()).getColor().getDefaultColor());
   }
 
   @Test

@@ -92,12 +92,18 @@ public final class ExcelImporter {
     return normalize(rows, false);
   }
 
+  static String restorePlusMinus(String value) {
+    // Office's legacy Symbol glyph and the UTF-8 bytes for ± misread as Windows-1252.
+    return value.replace("\uF0B1", "±").replace("Â±", "±");
+  }
+
   static List<Map<String, String>> normalize(List<Map<String, String>> rows, boolean tolerant)
       throws IOException {
     List<Map<String, String>> result = new ArrayList<>();
     String context = "";
     for (Map<String, String> original : rows) {
       Map<String, String> row = new HashMap<>(original);
+      row.replaceAll((key, value) -> key.startsWith("__") ? value : restorePlusMinus(value));
       String title = row.getOrDefault("题干", "").trim();
       if (!row.containsKey("试题类型") && row.getOrDefault("题型", "").trim().isEmpty())
         row.put("__typeMissing", "1");

@@ -1112,17 +1112,14 @@ public class MainActivity extends Activity {
     front.setBackground(bg(Color.WHITE));
     front.setElevation(dp(1));
     front.setPadding(dp(8), dp(8), dp(8), dp(8));
-    LinearLayout heading = new LinearLayout(this);
-    heading.setGravity(Gravity.TOP);
     TextView typeBadge = label(q.optString("type"), 13);
     typeBadge.setTextColor(0xff315cba);
     typeBadge.setBackground(bg(0xffeaf0ff));
     typeBadge.setPadding(dp(8), dp(4), dp(8), dp(4));
-    heading.addView(typeBadge);
+    front.addView(typeBadge, new LinearLayout.LayoutParams(-2, -2));
     TextView questionTitle = label((pageIndex + 1) + ". " + q.optString("title"), 17);
-    questionTitle.setPadding(dp(8), dp(2), dp(4), dp(6));
-    heading.addView(questionTitle, new LinearLayout.LayoutParams(0, -2, 1));
-    front.addView(heading);
+    questionTitle.setPadding(dp(4), dp(6), dp(4), dp(6));
+    front.addView(questionTitle);
     stage.addView(front, new FrameLayout.LayoutParams(-1, -2));
     body.addView(stage);
     LinearLayout actions = new LinearLayout(this);
@@ -1533,6 +1530,7 @@ public class MainActivity extends Activity {
     String expectedAnswer = q.optString("answer");
     boolean showResult = !expectedAnswer.isEmpty() && ((!exam && !answer(q).isEmpty()) || review);
     JSONObject options = q.optJSONObject("options");
+    boolean singleChoice = q.optString("type").equals("单选题");
     boolean allSelected = multiple(q) && draft.length() == options.length();
     int displayedIndex = 0;
     for (int i = 0; i < front.getChildCount(); i++) {
@@ -1547,14 +1545,15 @@ public class MainActivity extends Activity {
       if (showResult) {
         if (expectedAnswer.contains(key)) {
           marker = selected ? "选对" : "漏选";
-          background = selected ? 0xffc9f0db : 0xffffe5b4;
-          foreground = selected ? 0xff14683c : 0xff7c4a00;
+          background = selected || singleChoice ? 0xffc9f0db : 0xffffe5b4;
+          foreground = selected || singleChoice ? 0xff14683c : 0xff7c4a00;
         } else if (selected) {
           marker = "错选";
           background = 0xffffd7d7;
           foreground = 0xffc62828;
         }
       }
+      if (singleChoice) marker = "";
       char letter = (char) ('A' + displayedIndex++);
       String content = options.optString(key);
       option.setText(letter + "  " + content + (marker.isEmpty() ? "" : "  ·  " + marker));

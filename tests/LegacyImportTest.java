@@ -16,7 +16,7 @@ public final class LegacyImportTest {
     WritableSheet sheet = workbook.createSheet("题库", 0);
     String[][] data = {
       {"序号", "教材名称", "试题内容", "试题类型", "正确选项", "A", "B", "C", "D"},
-      {"1", "第一章", "普通单选 ±5℃", "1", "A", "甲", "±2", "丙", "丁"},
+      {"1", "第一章", "普通单选 ±5℃", "1", "A", "甲", "±2", "\uF0B1 3", "Â±4"},
       {"2", "第一章", "普通多选", "2", "AC", "甲", "乙", "丙", "丁"},
       {"3", "第一章", "判断题", "3", "B", "对", "错", "", ""},
       {"序号", "教材名称", "试题内容", "试题类型", "正确选项", "A", "B", "C", "D"},
@@ -34,6 +34,8 @@ public final class LegacyImportTest {
     check(rows.get(0).get("选项A").equals("甲"), "A-D aliases");
     check(rows.get(0).get("题干").equals("普通单选 ±5℃"), "XLS title symbols");
     check(rows.get(0).get("选项B").equals("±2"), "XLS option symbols");
+    check(rows.get(0).get("选项C").equals("± 3"), "XLS legacy Symbol encoding");
+    check(rows.get(0).get("选项D").equals("±4"), "XLS misdecoded UTF-8 plus-minus");
     check(rows.get(1).get("题型").equals("多选题"), "Numeric type");
     check(rows.get(2).get("题型").equals("判断题"), "Boolean type");
     check(rows.get(3).get("题干").equals("材料公共题干\n\n(1)"), "Scenario attached");
