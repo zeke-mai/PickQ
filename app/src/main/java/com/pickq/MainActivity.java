@@ -66,7 +66,15 @@ public class MainActivity extends Activity {
   }
 
   String answer(JSONObject q) {
-    return exam ? examAnswers.getOrDefault(id(q), "") : q.optString("response");
+    return exam ? examAnswers.getOrDefault(id(q), "") : q.optString(responseKey());
+  }
+
+  String responseKey() {
+    return randomPractice ? "randomResponse" : "response";
+  }
+
+  String rightKey() {
+    return randomPractice ? "randomRight" : "right";
   }
 
   public void onCreate(Bundle b) {
@@ -940,12 +948,14 @@ public class MainActivity extends Activity {
     bar.getChildAt(0).setContentDescription("返回主界面");
     bar.addView(button("⋮", () -> bankSettings()));
     card("顺序练习", "继续上次进度 · 即时解析", () -> start(false));
-    card("随机练习", "随机排列全部题目", () -> start(false, true));
+    card("随机练习", "随机题序 · 继续上次进度", () -> start(false, true));
     card("模拟考试", "按题型抽题 · 交卷后查看答案", () -> examSetup());
     card("错题集", "查看累计错题与错误次数", () -> wrongPage());
   }
 
   boolean randomPractice;
+  String practicePositionKey;
+
   void start(boolean wrong) { start(wrong, false); }
   void start(boolean wrong, boolean random) {
     randomPractice = random;
@@ -962,15 +972,15 @@ public class MainActivity extends Activity {
     exam = false;
     review = false;
     orders.clear();
-    index =
-        wrong
-            ? 0
-            : Math.max(
-                0,
-                Math.min(
-                    prefs.getInt("position:" + bank.optString("id"), bank.optInt("position")),
-                    questions.size() - 1));
-    if (random) { Collections.shuffle(questions); index = 0; }
+    String bankId = bank.optString("id");
+    practicePositionKey = wrong ? null : (random ? "randomPosition:" : "position:") + bankId;
+    if (random) {
+      String seedKey = "randomSeed:" + bankId;
+      if (!prefs.contains(seedKey)) prefs.edit().putLong(seedKey, new Random().nextLong()).apply();
+      Collections.shuffle(questions, new Random(prefs.getLong(seedKey, 0)));
+    }
+    int position = wrong ? 0 : prefs.getInt(practicePositionKey, random ? 0 : bank.optInt("position"));
+    index = Math.max(0, Math.min(position, questions.size() - 1));
     pendingAnswers.clear();
     practice();
   }
@@ -1098,13 +1108,12 @@ public class MainActivity extends Activity {
     scroll.addView(body);
     body.addView(label(q.optString("type") + " · " + q.optString("chapter"), 13));
     FrameLayout stage = new FrameLayout(this);
-    stage.setMinimumHeight(dp(320));
     LinearLayout front = new LinearLayout(this);
     front.setOrientation(LinearLayout.VERTICAL);
     front.setBackground(bg(Color.WHITE));
     front.setElevation(dp(1));
     front.setPadding(dp(8), dp(8), dp(8), dp(8));
-    front.addView(label(q.optString("title"), 21));
+    front.addView(label(q.optString("title"), 17));
     stage.addView(front, new FrameLayout.LayoutParams(-1, -2));
     body.addView(stage);
     LinearLayout actions = new LinearLayout(this);
@@ -1192,8 +1201,12 @@ public class MainActivity extends Activity {
           });
       front.addView(e);
     }
-    if (!review && (!choice(q) || multiple(q)))
-      actions.addView(button(exam ? "保存答案" : "提交答案", () -> submit(q)), new LinearLayout.LayoutParams(0, -2, 1));
+    if (!review && (!choice(q) || multiple(q))) {
+      Button submit = button(exam ? "保存答案" : "提交答案", () -> submit(q));
+      LinearLayout.LayoutParams submitLayout = new LinearLayout.LayoutParams(-2, -2);
+      if (multiple(q)) submitLayout.setMarginStart(dp(8));
+      actions.addView(submit, submitLayout);
+    }
     if ((!exam && !answer(q).isEmpty()) || review)
       body.addView(
           label("参考答案：" + displayedChoice(q, q.optString("answer")) + "\n解析：" + q.optString("explanation"), 16));
@@ -1307,9 +1320,9 @@ public class MainActivity extends Activity {
                   || !screen.equals("practice")) return;
               turning = false;
               index = from + direction;
-              if (direction != 0 && !exam && !randomPractice) {
-                put(bank, "position", index);
-                prefs.edit().putInt("position:" + bank.optString("id"), index).apply();
+              if (direction != 0 && !exam && practicePositionKey != null) {
+                if (!randomPractice) put(bank, "position", index);
+                prefs.edit().putInt(practicePositionKey, index).apply();
               }
               showPracticePage();
             });
@@ -1347,7 +1360,7 @@ public class MainActivity extends Activity {
     int done = 0, right = 0;
     for (JSONObject x : questions) {
       if (!answer(x).isEmpty()) done++;
-      if (exam ? review && x.optBoolean("examRight") : x.optBoolean("right")) right++;
+      if (exam ? review && x.optBoolean("examRight") : x.optBoolean(rightKey())) right++;
     }
     boolean hidden = exam && !review;
     TextView yes = label("  " + (hidden ? "—" : right), 14);
@@ -1547,8 +1560,8 @@ public class MainActivity extends Activity {
   }
 
   void record(JSONObject q, boolean ok) {
-    put(q, "response", draft);
-    put(q, "right", ok);
+    put(q, responseKey(), draft);
+    put(q, rightKey(), ok);
     if (!ok) put(q, "wrong", q.optInt("wrong") + 1);
     pendingAnswers.remove(id(q));
     saveWhenIdle();
@@ -1608,8 +1621,8 @@ public class MainActivity extends Activity {
               () -> {
                 JSONObject q = questions.get(index);
                 pendingAnswers.remove(id(q));
-                q.remove("response");
-                q.remove("right");
+                q.remove(responseKey());
+                q.remove(rightKey());
                 save();
                 d.dismiss();
                 practice();
@@ -1680,6 +1693,8 @@ public class MainActivity extends Activity {
                       pendingAnswers.remove(id(q));
                       q.remove("response");
                       q.remove("right");
+                      q.remove("randomResponse");
+                      q.remove("randomRight");
                       orders.clear();
                       save();
                       d.dismiss();

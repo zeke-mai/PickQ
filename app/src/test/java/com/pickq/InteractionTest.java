@@ -115,6 +115,12 @@ public class InteractionTest {
     View submit = withText(page, "提交答案");
     assertSame(all.getParent(), submit.getParent());
     assertNotSame(all.getParent(), wrong.getParent());
+    assertEquals(ViewGroup.LayoutParams.WRAP_CONTENT, submit.getLayoutParams().width);
+    TextView title = (TextView) withText(page, "Question 0");
+    assertEquals(
+        android.util.TypedValue.applyDimension(
+            android.util.TypedValue.COMPLEX_UNIT_SP, 17, title.getResources().getDisplayMetrics()),
+        title.getTextSize(), 0.01f);
     all.performClick();
     assertEquals("ABC", activity.draft);
     all.performClick();
@@ -134,23 +140,39 @@ public class InteractionTest {
   }
 
   @Test
-  public void randomPracticeUsesEveryQuestionWithoutChangingSequentialPosition() {
+  public void randomPracticeKeepsItsOwnAnswersOrderAndPosition() throws Exception {
     activity.prefs.edit().putInt("position:fixture", 2).commit();
+    JSONObject existing = activity.bank.getJSONArray("questions").getJSONObject(2);
+    existing.put("response", "AB").put("right", true);
     activity.bankPage();
     View random = withText(activity.root, "随机练习");
     assertNotNull(random);
     assertTrue(((View) random.getParent().getParent()).performClick());
     assertTrue(activity.randomPractice);
     assertEquals(0, activity.index);
+    assertEquals("", activity.answer(existing));
+    assertEquals("已做 0/4", activity.progressLabel.getText().toString());
     HashSet<String> ids = new HashSet<>();
     for (JSONObject q : activity.questions) ids.add(activity.id(q));
     assertEquals(new HashSet<>(Arrays.asList("q0", "q1", "q2", "q3")), ids);
+    java.util.ArrayList<JSONObject> randomOrder = new java.util.ArrayList<>(activity.questions);
     layout();
+    JSONObject answeredRandomly = activity.questions.get(0);
+    activity.draft = "A";
+    activity.submit(answeredRandomly);
+    assertEquals("A", activity.answer(answeredRandomly));
+    assertEquals("已做 1/4", activity.progressLabel.getText().toString());
     activity.move(1);
     settle();
     assertEquals(1, activity.index);
     activity.start(false);
     assertEquals(2, activity.index);
+    assertEquals("AB", activity.answer(existing));
+    assertEquals("已做 1/4", activity.progressLabel.getText().toString());
+    activity.start(false, true);
+    assertEquals(randomOrder, activity.questions);
+    assertEquals(1, activity.index);
+    assertEquals("A", activity.answer(answeredRandomly));
   }
 
   @Test
