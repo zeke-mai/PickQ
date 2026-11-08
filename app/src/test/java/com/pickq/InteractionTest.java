@@ -101,6 +101,7 @@ public class InteractionTest {
   public void shuffledLabelsKeepGradingAndFeedbackTiedToOptionContent() throws Exception {
     JSONObject question = activity.bank.getJSONArray("questions").getJSONObject(0);
     question.getJSONObject("options").put("C", "Three");
+    question.put("chapter", "不显示的章节");
     activity.start(false);
     activity.orders.put("q0", Arrays.asList("C", "A", "B"));
     activity.practice();
@@ -116,13 +117,20 @@ public class InteractionTest {
     assertSame(all.getParent(), submit.getParent());
     assertNotSame(all.getParent(), wrong.getParent());
     assertEquals(ViewGroup.LayoutParams.WRAP_CONTENT, submit.getLayoutParams().width);
-    TextView title = (TextView) withText(page, "Question 0");
+    TextView badge = (TextView) withText(page, "多选题");
+    TextView title = (TextView) withText(page, "1. Question 0");
+    assertNotNull(badge.getBackground());
+    assertSame(badge.getParent(), title.getParent());
+    assertNull(withText(page, "多选题 · 不显示的章节"));
     assertEquals(
         android.util.TypedValue.applyDimension(
             android.util.TypedValue.COMPLEX_UNIT_SP, 17, title.getResources().getDisplayMetrics()),
         title.getTextSize(), 0.01f);
     all.performClick();
     assertEquals("ABC", activity.draft);
+    assertEquals("A  Three", wrong.getText().toString());
+    assertEquals("B  One", correct.getText().toString());
+    assertTrue(wrong.isSelected());
     all.performClick();
     assertEquals("", activity.draft);
     wrong.performClick();
@@ -137,6 +145,23 @@ public class InteractionTest {
     assertEquals(0xffc62828, ((Button) page.findViewWithTag("C")).getCurrentTextColor());
     assertEquals("CA", question.getString("response"));
     assertFalse(question.getBoolean("right"));
+  }
+
+  @Test
+  public void submitLabelFitsAndHasSpaceFromSelectAllOnNarrowScreen() {
+    activity.start(false);
+    View page = activity.practicePages.get(0).view;
+    page.measure(
+        View.MeasureSpec.makeMeasureSpec(activity.dp(300), View.MeasureSpec.EXACTLY),
+        View.MeasureSpec.makeMeasureSpec(activity.dp(500), View.MeasureSpec.EXACTLY));
+    page.layout(0, 0, page.getMeasuredWidth(), page.getMeasuredHeight());
+    View all = withText(page, "全选");
+    Button submit = (Button) withText(page, "提交答案");
+    assertTrue(submit.getLeft() - all.getRight() >= activity.dp(32));
+    assertEquals(((View) submit.getParent()).getWidth(), submit.getRight());
+    assertEquals(1, submit.getLineCount());
+    assertEquals(0, submit.getLayout().getEllipsisCount(0));
+    assertTrue(submit.getLayout().getLineWidth(0) <= submit.getLayout().getWidth());
   }
 
   @Test

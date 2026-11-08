@@ -1106,19 +1106,28 @@ public class MainActivity extends Activity {
     LinearLayout body = new LinearLayout(this);
     body.setOrientation(LinearLayout.VERTICAL);
     scroll.addView(body);
-    body.addView(label(q.optString("type") + " · " + q.optString("chapter"), 13));
     FrameLayout stage = new FrameLayout(this);
     LinearLayout front = new LinearLayout(this);
     front.setOrientation(LinearLayout.VERTICAL);
     front.setBackground(bg(Color.WHITE));
     front.setElevation(dp(1));
     front.setPadding(dp(8), dp(8), dp(8), dp(8));
-    front.addView(label(q.optString("title"), 17));
+    LinearLayout heading = new LinearLayout(this);
+    heading.setGravity(Gravity.TOP);
+    TextView typeBadge = label(q.optString("type"), 13);
+    typeBadge.setTextColor(0xff315cba);
+    typeBadge.setBackground(bg(0xffeaf0ff));
+    typeBadge.setPadding(dp(8), dp(4), dp(8), dp(4));
+    heading.addView(typeBadge);
+    TextView questionTitle = label((pageIndex + 1) + ". " + q.optString("title"), 17);
+    questionTitle.setPadding(dp(8), dp(2), dp(4), dp(6));
+    heading.addView(questionTitle, new LinearLayout.LayoutParams(0, -2, 1));
+    front.addView(heading);
     stage.addView(front, new FrameLayout.LayoutParams(-1, -2));
     body.addView(stage);
     LinearLayout actions = new LinearLayout(this);
     actions.setGravity(Gravity.CENTER_VERTICAL);
-    body.addView(actions);
+    body.addView(actions, new LinearLayout.LayoutParams(-1, -2));
     CheckBox selectAll = new CheckBox(this);
     if (choice(q)) {
       JSONObject opts = q.optJSONObject("options");
@@ -1203,9 +1212,12 @@ public class MainActivity extends Activity {
     }
     if (!review && (!choice(q) || multiple(q))) {
       Button submit = button(exam ? "保存答案" : "提交答案", () -> submit(q));
-      LinearLayout.LayoutParams submitLayout = new LinearLayout.LayoutParams(-2, -2);
-      if (multiple(q)) submitLayout.setMarginStart(dp(8));
-      actions.addView(submit, submitLayout);
+      submit.setSingleLine(false);
+      submit.setPadding(dp(12), dp(8), dp(12), dp(8));
+      submit.setMinWidth(dp(108));
+      submit.setMinimumWidth(dp(108));
+      if (multiple(q)) actions.addView(new Space(this), new LinearLayout.LayoutParams(0, 1, 1));
+      actions.addView(submit, new LinearLayout.LayoutParams(-2, -2));
     }
     if ((!exam && !answer(q).isEmpty()) || review)
       body.addView(
@@ -1520,6 +1532,8 @@ public class MainActivity extends Activity {
   void refreshOptions(LinearLayout front, JSONObject q) {
     String expectedAnswer = q.optString("answer");
     boolean showResult = !expectedAnswer.isEmpty() && ((!exam && !answer(q).isEmpty()) || review);
+    JSONObject options = q.optJSONObject("options");
+    boolean allSelected = multiple(q) && draft.length() == options.length();
     int displayedIndex = 0;
     for (int i = 0; i < front.getChildCount(); i++) {
       View v = front.getChildAt(i);
@@ -1529,7 +1543,7 @@ public class MainActivity extends Activity {
       boolean selected = draft.contains(key);
       int background = selected ? 0xffdbe5ff : 0xfff3f5f9;
       int foreground = 0xff263650;
-      String marker = selected ? "已选" : "";
+      String marker = selected && !allSelected ? "已选" : "";
       if (showResult) {
         if (expectedAnswer.contains(key)) {
           marker = selected ? "选对" : "漏选";
@@ -1542,8 +1556,9 @@ public class MainActivity extends Activity {
         }
       }
       char letter = (char) ('A' + displayedIndex++);
-      String content = q.optJSONObject("options").optString(key);
+      String content = options.optString(key);
       option.setText(letter + "  " + content + (marker.isEmpty() ? "" : "  ·  " + marker));
+      option.setSelected(selected);
       option.setTextColor(foreground);
       option.setBackground(bg(background));
     }
