@@ -265,8 +265,9 @@ public class InteractionTest {
     MotionEvent up = MotionEvent.obtain(time, time + 40, MotionEvent.ACTION_UP, 10, activity.dp(4), 0);
     activity.resultBar.dispatchTouchEvent(down);
     activity.resultBar.dispatchTouchEvent(move);
-    View panel = (View) overviewNumbers().getParent();
+    MainActivity.OverviewPanel panel = (MainActivity.OverviewPanel) overviewNumbers().getParent();
     assertEquals(activity.overviewHeight() - activity.dp(26), panel.getTranslationY(), 0.01f);
+    assertTrue(panel.shade.getAlpha() > 0 && panel.shade.getAlpha() < 120);
     activity.resultBar.dispatchTouchEvent(up);
     down.recycle();
     move.recycle();
@@ -277,6 +278,33 @@ public class InteractionTest {
     assertEquals("第 1 题，已作答，当前题", answered.getContentDescription());
     assertEquals(0xffdbe5ff, ((GradientDrawable) answered.getBackground()).getColor().getDefaultColor());
     activity.questionOverview.dismiss();
+  }
+
+  @Test
+  public void draggingOverviewDownFadesShadeAndClosesIt() {
+    activity.start(false);
+    layout();
+    activity.showQuestionOverview();
+    MainActivity.OverviewPanel panel = (MainActivity.OverviewPanel) overviewNumbers().getParent();
+    panel.animate().cancel();
+    panel.moveTo(0);
+    int openAlpha = panel.shade.getAlpha();
+    assertTrue(openAlpha >= 119);
+    long time = android.os.SystemClock.uptimeMillis();
+    MotionEvent down = MotionEvent.obtain(time, time, MotionEvent.ACTION_DOWN, 10, activity.dp(10), 0);
+    MotionEvent move = MotionEvent.obtain(time, time + 20, MotionEvent.ACTION_MOVE, 10, activity.dp(72), 0);
+    MotionEvent up = MotionEvent.obtain(time, time + 40, MotionEvent.ACTION_UP, 10, activity.dp(72), 0);
+    panel.dispatchTouchEvent(down);
+    panel.dispatchTouchEvent(move);
+    assertEquals(activity.dp(62), panel.getTranslationY(), 0.01f);
+    assertTrue(panel.shade.getAlpha() > 0 && panel.shade.getAlpha() < openAlpha);
+    panel.dispatchTouchEvent(up);
+    down.recycle();
+    move.recycle();
+    up.recycle();
+    settle();
+    assertNull(activity.questionOverview);
+    assertEquals(0, panel.shade.getAlpha());
   }
 
   @Test

@@ -1414,7 +1414,7 @@ public class MainActivity extends Activity {
   final class PracticeFooter extends LinearLayout {
     float downX, downY;
     boolean tracking;
-    View draggedOverview;
+    OverviewPanel draggedOverview;
 
     PracticeFooter() {
       super(MainActivity.this);
@@ -1437,15 +1437,13 @@ public class MainActivity extends Activity {
       }
       if (draggedOverview != null) {
         if (action == MotionEvent.ACTION_MOVE) {
-          draggedOverview.setTranslationY(Math.max(0, overviewHeight() - Math.max(0, rise)));
+          draggedOverview.moveTo(overviewHeight() - rise);
         } else if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL
             || action == MotionEvent.ACTION_POINTER_DOWN) {
-          View panel = draggedOverview;
+          OverviewPanel panel = draggedOverview;
           draggedOverview = null;
           tracking = false;
-          if (questionOverview != null) {
-            settleQuestionOverview(questionOverview, panel, action == MotionEvent.ACTION_UP && rise >= dp(24));
-          }
+          if (panel.sheet == questionOverview) panel.settle(action == MotionEvent.ACTION_UP && rise >= dp(24));
         }
         return true;
       }
@@ -1471,46 +1469,108 @@ public class MainActivity extends Activity {
   }
 
   void showQuestionOverview() {
-    View panel = openQuestionOverview(false);
-    if (panel != null) settleQuestionOverview(questionOverview, panel, true);
+    OverviewPanel panel = openQuestionOverview(false);
+    if (panel != null) panel.settle(true);
   }
 
   int overviewHeight() {
     return dp(getResources().getConfiguration().screenHeightDp) / 2;
   }
 
-  void settleQuestionOverview(Dialog sheet, View panel, boolean open) {
-    if (open) {
-      Window window = sheet.getWindow();
-      window.clearFlags(WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE);
-      window.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+  final class OverviewPanel extends LinearLayout {
+    final Dialog sheet;
+    final View background = root;
+    final android.graphics.drawable.ColorDrawable shade = new android.graphics.drawable.ColorDrawable(Color.BLACK);
+    GridView numbers;
+    float downX, downY, initialOffset;
+    boolean canPullDown, pullingDown;
+
+    OverviewPanel(Dialog sheet) {
+      super(MainActivity.this);
+      this.sheet = sheet;
+      moveTo(overviewHeight());
+      background.getOverlay().add(shade);
     }
-    panel.animate()
-        .translationY(open ? 0 : overviewHeight())
-        .setDuration(open ? 220 : 160)
-        .setInterpolator(new android.view.animation.DecelerateInterpolator())
-        .withEndAction(open ? null : sheet::dismiss)
-        .start();
+
+    void updateShade() {
+      shade.setBounds(0, 0, background.getWidth(), background.getHeight());
+      float revealed = 1f - getTranslationY() / Math.max(1, overviewHeight());
+      shade.setAlpha(Math.round(120 * Math.max(0f, Math.min(1f, revealed))));
+    }
+
+    void moveTo(float offset) {
+      setTranslationY(Math.max(0, Math.min(overviewHeight(), offset)));
+      updateShade();
+    }
+
+    void settle(boolean open) {
+      if (open) {
+        sheet.getWindow().clearFlags(
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE);
+      }
+      animate().translationY(open ? 0 : overviewHeight())
+          .setDuration(open ? 220 : 160)
+          .setInterpolator(new android.view.animation.DecelerateInterpolator())
+          .setUpdateListener(animation -> updateShade())
+          .withEndAction(open ? this::updateShade : sheet::dismiss)
+          .start();
+    }
+
+    @Override
+    public boolean dispatchTouchEvent(MotionEvent event) {
+      int action = event.getActionMasked();
+      if (action == MotionEvent.ACTION_DOWN) {
+        downX = event.getRawX();
+        downY = event.getRawY();
+        canPullDown = event.getY() < numbers.getTop() || !numbers.canScrollVertically(-1);
+      }
+      float drop = event.getRawY() - downY;
+      if (action == MotionEvent.ACTION_MOVE && canPullDown && !pullingDown) {
+        float sideways = Math.abs(event.getRawX() - downX);
+        int slop = ViewConfiguration.get(MainActivity.this).getScaledTouchSlop();
+        if (drop > slop && drop > sideways) {
+          animate().cancel();
+          initialOffset = getTranslationY();
+          pullingDown = true;
+          MotionEvent cancel = MotionEvent.obtain(event);
+          cancel.setAction(MotionEvent.ACTION_CANCEL);
+          super.dispatchTouchEvent(cancel);
+          cancel.recycle();
+        } else if (drop < -slop || sideways > slop) canPullDown = false;
+      }
+      if (pullingDown) {
+        if (action == MotionEvent.ACTION_MOVE) moveTo(initialOffset + Math.max(0, drop));
+        else if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL
+            || action == MotionEvent.ACTION_POINTER_DOWN) {
+          pullingDown = false;
+          canPullDown = false;
+          settle(action != MotionEvent.ACTION_UP || drop < dp(48));
+        }
+        return true;
+      }
+      if (action == MotionEvent.ACTION_CANCEL || action == MotionEvent.ACTION_POINTER_DOWN) canPullDown = false;
+      return super.dispatchTouchEvent(event) || action == MotionEvent.ACTION_DOWN;
+    }
   }
 
-  View openQuestionOverview(boolean dragging) {
+  OverviewPanel openQuestionOverview(boolean dragging) {
     if (!screen.equals("practice") || questions.isEmpty() || questionOverview != null) return null;
     Dialog sheet = new Dialog(this);
     sheet.requestWindowFeature(Window.FEATURE_NO_TITLE);
-    LinearLayout content = new LinearLayout(this);
+    OverviewPanel content = new OverviewPanel(sheet);
     content.setOrientation(LinearLayout.VERTICAL);
     content.setPadding(dp(12), dp(8), dp(12), dp(8));
     content.setBackground(bg(Color.WHITE));
-    content.setTranslationY(overviewHeight());
     LinearLayout heading = new LinearLayout(this);
     heading.setGravity(Gravity.CENTER_VERTICAL);
     heading.addView(label("题号总览", 18), new LinearLayout.LayoutParams(0, -2, 1));
-    heading.addView(button("关闭", sheet::dismiss));
+    heading.addView(button("关闭", () -> content.settle(false)));
     content.addView(heading);
     boolean ungradedExam = exam && !review;
     content.addView(label(ungradedExam ? "蓝色已作答 · 灰色未答" : "绿色答对 · 红色答错 · 灰色未答", 13));
 
     GridView numbers = new GridView(this);
+    content.numbers = numbers;
     numbers.setNumColumns(GridView.AUTO_FIT);
     numbers.setColumnWidth(dp(48));
     numbers.setHorizontalSpacing(dp(6));
@@ -1555,6 +1615,8 @@ public class MainActivity extends Activity {
     content.addView(numbers, new LinearLayout.LayoutParams(-1, 0, 1));
     sheet.setContentView(content);
     sheet.setOnDismissListener(dialog -> {
+      content.animate().cancel();
+      content.background.getOverlay().remove(content.shade);
       if (questionOverview == sheet) questionOverview = null;
     });
     questionOverview = sheet;
@@ -1562,9 +1624,9 @@ public class MainActivity extends Activity {
     window.setBackgroundDrawableResource(android.R.color.transparent);
     window.setGravity(Gravity.BOTTOM);
     window.setWindowAnimations(0);
+    window.clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
     if (dragging) {
       window.addFlags(WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE);
-      window.clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
     }
     sheet.show();
     window.setLayout(-1, overviewHeight());
