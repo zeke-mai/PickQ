@@ -1414,6 +1414,7 @@ public class MainActivity extends Activity {
   final class PracticeFooter extends LinearLayout {
     float downX, downY;
     boolean tracking;
+    View draggedOverview;
 
     PracticeFooter() {
       super(MainActivity.this);
@@ -1426,14 +1427,32 @@ public class MainActivity extends Activity {
         downX = event.getRawX();
         downY = event.getRawY();
         tracking = true;
-      } else if (action == MotionEvent.ACTION_UP && tracking) {
+      }
+      float rise = downY - event.getRawY();
+      boolean upward = rise > Math.abs(event.getRawX() - downX);
+      if (action == MotionEvent.ACTION_MOVE && tracking && draggedOverview == null
+          && upward && rise > ViewConfiguration.get(MainActivity.this).getScaledTouchSlop()) {
+        cancelFooterTouch(event);
+        draggedOverview = openQuestionOverview(true);
+      }
+      if (draggedOverview != null) {
+        if (action == MotionEvent.ACTION_MOVE) {
+          draggedOverview.setTranslationY(Math.max(0, overviewHeight() - Math.max(0, rise)));
+        } else if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL
+            || action == MotionEvent.ACTION_POINTER_DOWN) {
+          View panel = draggedOverview;
+          draggedOverview = null;
+          tracking = false;
+          if (questionOverview != null) {
+            settleQuestionOverview(questionOverview, panel, action == MotionEvent.ACTION_UP && rise >= dp(24));
+          }
+        }
+        return true;
+      }
+      if (action == MotionEvent.ACTION_UP && tracking) {
         tracking = false;
-        float rise = downY - event.getRawY();
-        if (rise >= dp(24) && rise > Math.abs(event.getRawX() - downX)) {
-          MotionEvent cancel = MotionEvent.obtain(event);
-          cancel.setAction(MotionEvent.ACTION_CANCEL);
-          super.dispatchTouchEvent(cancel);
-          cancel.recycle();
+        if (rise >= dp(24) && upward) {
+          cancelFooterTouch(event);
           showQuestionOverview();
           return true;
         }
@@ -1442,16 +1461,47 @@ public class MainActivity extends Activity {
       }
       return super.dispatchTouchEvent(event) || action == MotionEvent.ACTION_DOWN;
     }
+
+    void cancelFooterTouch(MotionEvent event) {
+      MotionEvent cancel = MotionEvent.obtain(event);
+      cancel.setAction(MotionEvent.ACTION_CANCEL);
+      super.dispatchTouchEvent(cancel);
+      cancel.recycle();
+    }
   }
 
   void showQuestionOverview() {
-    if (!screen.equals("practice") || questions.isEmpty() || questionOverview != null) return;
+    View panel = openQuestionOverview(false);
+    if (panel != null) settleQuestionOverview(questionOverview, panel, true);
+  }
+
+  int overviewHeight() {
+    return dp(getResources().getConfiguration().screenHeightDp) / 2;
+  }
+
+  void settleQuestionOverview(Dialog sheet, View panel, boolean open) {
+    if (open) {
+      Window window = sheet.getWindow();
+      window.clearFlags(WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE);
+      window.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+    }
+    panel.animate()
+        .translationY(open ? 0 : overviewHeight())
+        .setDuration(open ? 220 : 160)
+        .setInterpolator(new android.view.animation.DecelerateInterpolator())
+        .withEndAction(open ? null : sheet::dismiss)
+        .start();
+  }
+
+  View openQuestionOverview(boolean dragging) {
+    if (!screen.equals("practice") || questions.isEmpty() || questionOverview != null) return null;
     Dialog sheet = new Dialog(this);
     sheet.requestWindowFeature(Window.FEATURE_NO_TITLE);
     LinearLayout content = new LinearLayout(this);
     content.setOrientation(LinearLayout.VERTICAL);
     content.setPadding(dp(12), dp(8), dp(12), dp(8));
     content.setBackground(bg(Color.WHITE));
+    content.setTranslationY(overviewHeight());
     LinearLayout heading = new LinearLayout(this);
     heading.setGravity(Gravity.CENTER_VERTICAL);
     heading.addView(label("题号总览", 18), new LinearLayout.LayoutParams(0, -2, 1));
@@ -1511,9 +1561,15 @@ public class MainActivity extends Activity {
     Window window = sheet.getWindow();
     window.setBackgroundDrawableResource(android.R.color.transparent);
     window.setGravity(Gravity.BOTTOM);
+    window.setWindowAnimations(0);
+    if (dragging) {
+      window.addFlags(WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE);
+      window.clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+    }
     sheet.show();
-    window.setLayout(-1, dp(getResources().getConfiguration().screenHeightDp) / 2);
+    window.setLayout(-1, overviewHeight());
     numbers.setSelection(index);
+    return content;
   }
 
   final class ResultIcon extends android.graphics.drawable.Drawable {
@@ -1660,8 +1716,7 @@ public class MainActivity extends Activity {
     String expectedAnswer = q.optString("answer");
     boolean showResult = !expectedAnswer.isEmpty() && ((!exam && !answer(q).isEmpty()) || review);
     JSONObject options = q.optJSONObject("options");
-    boolean singleChoice = q.optString("type").equals("单选题");
-    boolean allSelected = multiple(q) && draft.length() == options.length();
+    boolean multi = multiple(q);
     int displayedIndex = 0;
     for (int i = 0; i < front.getChildCount(); i++) {
       View v = front.getChildAt(i);
@@ -1671,19 +1726,18 @@ public class MainActivity extends Activity {
       boolean selected = draft.contains(key);
       int background = selected ? 0xffdbe5ff : 0xfff3f5f9;
       int foreground = 0xff263650;
-      String marker = selected && !allSelected ? "已选" : "";
+      String marker = "";
       if (showResult) {
         if (expectedAnswer.contains(key)) {
-          marker = selected ? "选对" : "漏选";
-          background = selected || singleChoice ? 0xffc9f0db : 0xffffe5b4;
-          foreground = selected || singleChoice ? 0xff14683c : 0xff7c4a00;
+          if (multi) marker = selected ? "选对" : "漏选";
+          background = selected || !multi ? 0xffc9f0db : 0xffffe5b4;
+          foreground = selected || !multi ? 0xff14683c : 0xff7c4a00;
         } else if (selected) {
-          marker = "错选";
+          if (multi) marker = "错选";
           background = 0xffffd7d7;
           foreground = 0xffc62828;
         }
       }
-      if (singleChoice) marker = "";
       char letter = (char) ('A' + displayedIndex++);
       String content = options.optString(key);
       option.setText(letter + "  " + content + (marker.isEmpty() ? "" : "  ·  " + marker));

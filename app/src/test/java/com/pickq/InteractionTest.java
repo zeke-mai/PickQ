@@ -138,6 +138,11 @@ public class InteractionTest {
     assertEquals("A  Three", wrong.getText().toString());
     assertEquals("B  One", correct.getText().toString());
     assertTrue(wrong.isSelected());
+    wrong.performClick();
+    assertFalse(all.isChecked());
+    assertEquals("B  One", correct.getText().toString());
+    assertTrue(correct.isSelected());
+    all.performClick();
     all.performClick();
     assertEquals("", activity.draft);
     wrong.performClick();
@@ -174,6 +179,20 @@ public class InteractionTest {
     correct = activity.practicePages.get(0).view.findViewWithTag("A");
     assertEquals("A  One", correct.getText().toString());
     assertEquals(0xffc9f0db, ((android.graphics.drawable.GradientDrawable) correct.getBackground()).getColor().getDefaultColor());
+  }
+
+  @Test
+  public void judgmentUsesColorsWithoutMissedOptionText() throws Exception {
+    JSONObject question = activity.bank.getJSONArray("questions").getJSONObject(0);
+    question.put("type", "判断题").put("answer", "A");
+    activity.start(false);
+    activity.practicePages.get(0).view.findViewWithTag("B").performClick();
+    View page = activity.practicePages.get(0).view;
+    Button correct = page.findViewWithTag("A"), wrong = page.findViewWithTag("B");
+    assertEquals("A  One", correct.getText().toString());
+    assertEquals("B  Two", wrong.getText().toString());
+    assertEquals(0xffc9f0db, ((GradientDrawable) correct.getBackground()).getColor().getDefaultColor());
+    assertEquals(0xffffd7d7, ((GradientDrawable) wrong.getBackground()).getColor().getDefaultColor());
   }
 
   @Test
@@ -242,10 +261,15 @@ public class InteractionTest {
     layout();
     long time = android.os.SystemClock.uptimeMillis();
     MotionEvent down = MotionEvent.obtain(time, time, MotionEvent.ACTION_DOWN, 10, activity.dp(42), 0);
+    MotionEvent move = MotionEvent.obtain(time, time + 20, MotionEvent.ACTION_MOVE, 10, activity.dp(16), 0);
     MotionEvent up = MotionEvent.obtain(time, time + 40, MotionEvent.ACTION_UP, 10, activity.dp(4), 0);
     activity.resultBar.dispatchTouchEvent(down);
+    activity.resultBar.dispatchTouchEvent(move);
+    View panel = (View) overviewNumbers().getParent();
+    assertEquals(activity.overviewHeight() - activity.dp(26), panel.getTranslationY(), 0.01f);
     activity.resultBar.dispatchTouchEvent(up);
     down.recycle();
+    move.recycle();
     up.recycle();
     assertTrue(activity.questionOverview.isShowing());
     GridView numbers = overviewNumbers();
