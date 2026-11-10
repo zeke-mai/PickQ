@@ -228,7 +228,9 @@ public class InteractionTest {
     activity.start(false);
     layout();
     assertNull(withText(activity.resultBar, "题号总览"));
-    activity.showQuestionOverview();
+    View firstCounter = activity.resultStats.getChildAt(0);
+    assertEquals(activity.resultStats.getWidth(), firstCounter.getLeft() + activity.progressLabel.getRight(), 1);
+    assertTrue(activity.progressLabel.performClick());
     assertTrue(activity.questionOverview.isShowing());
     assertEquals(
         activity.dp(activity.getResources().getConfiguration().screenHeightDp) / 2,
@@ -526,11 +528,11 @@ public class InteractionTest {
     activity.exam = true;
     activity.practice();
     layout();
-    assertEquals(4, activity.resultBar.getChildCount());
+    assertEquals(2, activity.resultBar.getChildCount());
     activity.review = true;
     activity.practice();
     layout();
-    assertEquals(3, activity.resultBar.getChildCount());
+    assertEquals(1, activity.resultBar.getChildCount());
   }
 
   @Test

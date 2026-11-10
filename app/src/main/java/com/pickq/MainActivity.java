@@ -44,6 +44,7 @@ public class MainActivity extends Activity {
 
   TextView progressLabel;
   LinearLayout resultBar;
+  LinearLayout resultStats;
   Dialog questionOverview;
   long importGeneration;
   Uri pendingImportUri;
@@ -227,6 +228,7 @@ public class MainActivity extends Activity {
     turning = false;
     dragging = false;
     resultBar = null;
+    resultStats = null;
     root = new LinearLayout(this);
     root.setOrientation(LinearLayout.VERTICAL);
     root.setPadding(dp(12), dp(8), dp(12), dp(8));
@@ -1068,6 +1070,9 @@ public class MainActivity extends Activity {
       resultBar.setBackground(bg(Color.WHITE));
       resultBar.setPadding(dp(8), dp(10), dp(8), dp(10));
       resultBar.setMinimumHeight(dp(56));
+      resultStats = new LinearLayout(this);
+      resultStats.setGravity(Gravity.CENTER);
+      resultBar.addView(resultStats, new LinearLayout.LayoutParams(0, -2, 1));
       root.addView(resultBar);
       updateProgress();
       if (exam && !review)
@@ -1383,11 +1388,8 @@ public class MainActivity extends Activity {
   }
 
   void updateProgress() {
-    if (resultBar == null || !screen.equals("practice")) return;
-    // Keep the exam controls while updating the counters in place.
-    if (resultBar.getChildCount() >= 3) {
-      resultBar.removeViews(0, 3);
-    }
+    if (resultStats == null || !screen.equals("practice")) return;
+    resultStats.removeAllViews();
     int done = 0, right = 0;
     for (JSONObject x : questions) {
       if (!answer(x).isEmpty()) done++;
@@ -1404,11 +1406,15 @@ public class MainActivity extends Activity {
     no.setCompoundDrawablesWithIntrinsicBounds(new ResultIcon(false), null, null, null);
     no.setTextColor(0xffd33443);
     no.setContentDescription(hidden ? "交卷后显示答错数量" : "答错 " + (done - right) + " 题");
-    resultBar.addView(yes, 0);
-    resultBar.addView(no, 1);
+    resultStats.addView(yes);
+    resultStats.addView(no);
     progressLabel = label("已做 " + done + "/" + questions.size(), 14);
-    progressLabel.setPadding(dp(4), 0, dp(4), 0);
-    resultBar.addView(progressLabel, 2, new LinearLayout.LayoutParams(0, -2, 1));
+    progressLabel.setGravity(Gravity.CENTER);
+    progressLabel.setPadding(dp(8), 0, dp(8), 0);
+    progressLabel.setMinHeight(dp(48));
+    progressLabel.setContentDescription(progressLabel.getText() + "，打开题号总览");
+    progressLabel.setOnClickListener(v -> showQuestionOverview());
+    resultStats.addView(progressLabel);
   }
 
   final class PracticeFooter extends LinearLayout {
