@@ -1039,6 +1039,9 @@ public class MainActivity extends Activity {
     screen = "practice";
     if (!reuse) {
       shell("");
+      Button back = button("‹", this::onBackPressed);
+      back.setContentDescription("返回题库");
+      bar.addView(back, 0);
       bar.addView(button("⋮", () -> practiceMenu()));
       root.removeViewAt(1);
       practiceExam = exam;
@@ -1064,12 +1067,9 @@ public class MainActivity extends Activity {
       resultBar.setGravity(Gravity.CENTER_VERTICAL);
       resultBar.setBackground(bg(Color.WHITE));
       resultBar.setPadding(dp(8), dp(10), dp(8), dp(10));
+      resultBar.setMinimumHeight(dp(56));
       root.addView(resultBar);
       updateProgress();
-      Button overview = button("题号总览", this::showQuestionOverview);
-      overview.setTextSize(13);
-      overview.setPadding(dp(8), dp(4), dp(8), dp(4));
-      resultBar.addView(overview);
       if (exam && !review)
         resultBar.addView(
             button(
@@ -1384,7 +1384,7 @@ public class MainActivity extends Activity {
 
   void updateProgress() {
     if (resultBar == null || !screen.equals("practice")) return;
-    // Keep the overview and exam controls while updating the counters in place.
+    // Keep the exam controls while updating the counters in place.
     if (resultBar.getChildCount() >= 3) {
       resultBar.removeViews(0, 3);
     }

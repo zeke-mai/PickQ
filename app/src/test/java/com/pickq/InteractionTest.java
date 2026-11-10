@@ -113,7 +113,7 @@ public class InteractionTest {
     assertEquals("A  Three", wrong.getText().toString());
     assertEquals("B  One", correct.getText().toString());
     assertEquals(Gravity.START, wrong.getGravity() & Gravity.RELATIVE_HORIZONTAL_GRAVITY_MASK);
-    assertEquals("", ((TextView) activity.bar.getChildAt(0)).getText().toString());
+    assertEquals("", ((TextView) activity.bar.getChildAt(1)).getText().toString());
 
     CheckBox all = (CheckBox) withText(page, "全选");
     View submit = withText(page, "提交答案");
@@ -227,7 +227,8 @@ public class InteractionTest {
     questions.getJSONObject(1).put("response", "A").put("right", false);
     activity.start(false);
     layout();
-    withText(activity.resultBar, "题号总览").performClick();
+    assertNull(withText(activity.resultBar, "题号总览"));
+    activity.showQuestionOverview();
     assertTrue(activity.questionOverview.isShowing());
     assertEquals(
         activity.dp(activity.getResources().getConfiguration().screenHeightDp) / 2,
@@ -525,10 +526,28 @@ public class InteractionTest {
     activity.exam = true;
     activity.practice();
     layout();
-    assertEquals(5, activity.resultBar.getChildCount());
+    assertEquals(4, activity.resultBar.getChildCount());
     activity.review = true;
     activity.practice();
     layout();
-    assertEquals(4, activity.resultBar.getChildCount());
+    assertEquals(3, activity.resultBar.getChildCount());
+  }
+
+  @Test
+  public void questionBackButtonConfirmsExitDuringAnExam() {
+    activity.start(false);
+    activity.exam = true;
+    activity.practice();
+    View back = activity.bar.getChildAt(0);
+    assertEquals("返回题库", back.getContentDescription());
+    back.performClick();
+    AlertDialog confirmation = ShadowAlertDialog.getLatestAlertDialog();
+    confirmation.getButton(AlertDialog.BUTTON_NEGATIVE).performClick();
+    shadowOf(Looper.getMainLooper()).idle();
+    assertEquals("practice", activity.screen);
+    back.performClick();
+    ShadowAlertDialog.getLatestAlertDialog().getButton(AlertDialog.BUTTON_POSITIVE).performClick();
+    shadowOf(Looper.getMainLooper()).idle();
+    assertEquals("bank", activity.screen);
   }
 }
