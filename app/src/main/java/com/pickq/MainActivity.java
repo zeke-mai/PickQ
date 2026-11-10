@@ -1483,13 +1483,28 @@ public class MainActivity extends Activity {
     return dp(getResources().getConfiguration().screenHeightDp) / 2;
   }
 
+  final class OverviewDialog extends Dialog {
+    final OverviewPanel panel;
+
+    OverviewDialog() {
+      super(MainActivity.this);
+      panel = new OverviewPanel(this);
+    }
+
+    @Override
+    public void cancel() {
+      if (isShowing()) panel.settle(false);
+      else super.cancel();
+    }
+  }
+
   final class OverviewPanel extends LinearLayout {
     final Dialog sheet;
     final View background = root;
     final android.graphics.drawable.ColorDrawable shade = new android.graphics.drawable.ColorDrawable(Color.BLACK);
     GridView numbers;
     float downX, downY, initialOffset;
-    boolean canPullDown, pullingDown;
+    boolean canPullDown, pullingDown, closing;
 
     OverviewPanel(Dialog sheet) {
       super(MainActivity.this);
@@ -1510,6 +1525,9 @@ public class MainActivity extends Activity {
     }
 
     void settle(boolean open) {
+      if (closing) return;
+      closing = !open;
+      animate().cancel();
       if (open) {
         sheet.getWindow().clearFlags(
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE);
@@ -1524,6 +1542,7 @@ public class MainActivity extends Activity {
 
     @Override
     public boolean dispatchTouchEvent(MotionEvent event) {
+      if (closing) return true;
       int action = event.getActionMasked();
       if (action == MotionEvent.ACTION_DOWN) {
         downX = event.getRawX();
@@ -1561,9 +1580,10 @@ public class MainActivity extends Activity {
 
   OverviewPanel openQuestionOverview(boolean dragging) {
     if (!screen.equals("practice") || questions.isEmpty() || questionOverview != null) return null;
-    Dialog sheet = new Dialog(this);
+    OverviewDialog sheet = new OverviewDialog();
     sheet.requestWindowFeature(Window.FEATURE_NO_TITLE);
-    OverviewPanel content = new OverviewPanel(sheet);
+    sheet.setCanceledOnTouchOutside(true);
+    OverviewPanel content = sheet.panel;
     content.setOrientation(LinearLayout.VERTICAL);
     content.setPadding(dp(12), dp(8), dp(12), dp(8));
     content.setBackground(bg(Color.WHITE));

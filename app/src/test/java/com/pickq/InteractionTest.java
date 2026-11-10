@@ -311,6 +311,26 @@ public class InteractionTest {
   }
 
   @Test
+  public void tappingOutsideFadesOverviewBeforeDismissal() {
+    activity.start(false);
+    layout();
+    activity.showQuestionOverview();
+    settle();
+    MainActivity.OverviewDialog sheet = (MainActivity.OverviewDialog) activity.questionOverview;
+    assertTrue(sheet.panel.shade.getAlpha() > 0);
+    long time = android.os.SystemClock.uptimeMillis();
+    MotionEvent outside = MotionEvent.obtain(time, time, MotionEvent.ACTION_DOWN, 10, -activity.dp(40), 0);
+    assertTrue(sheet.onTouchEvent(outside));
+    outside.recycle();
+
+    assertTrue(sheet.isShowing());
+    settle();
+    assertNull(activity.questionOverview);
+    assertEquals(activity.overviewHeight(), sheet.panel.getTranslationY(), 0.01f);
+    assertEquals(0, sheet.panel.shade.getAlpha());
+  }
+
+  @Test
   public void randomPracticeKeepsItsOwnAnswersOrderAndPosition() throws Exception {
     activity.prefs.edit().putInt("position:fixture", 2).commit();
     JSONObject existing = activity.bank.getJSONArray("questions").getJSONObject(2);
