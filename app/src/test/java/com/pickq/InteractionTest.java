@@ -17,6 +17,7 @@ import android.widget.GridView;
 import android.widget.TextView;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
 import org.json.*;
@@ -151,7 +152,8 @@ public class InteractionTest {
 
     page = activity.practicePages.get(0).view;
     assertNotNull(withText(page, "A  Three  ·  错选"));
-    assertNotNull(withText(page, "B  One  ·  选对"));
+    assertNotNull(withText(page, "B  One"));
+    assertEquals(0xff14683c, ((Button) page.findViewWithTag("A")).getCurrentTextColor());
     assertNotNull(withText(page, "C  Two  ·  漏选"));
     assertNotNull(withText(page, "参考答案：BC\n解析："));
     assertEquals(0xffc62828, ((Button) page.findViewWithTag("C")).getCurrentTextColor());
@@ -364,6 +366,67 @@ public class InteractionTest {
     assertEquals(randomOrder, activity.questions);
     assertEquals(1, activity.index);
     assertEquals("A", activity.answer(answeredRandomly));
+  }
+
+  @Test
+  public void reshuffleStartsFreshWithoutClearingSequentialAnswers() throws Exception {
+    for (int i = 0; i < 4; i++) {
+      activity.bank.getJSONArray("questions").getJSONObject(i)
+          .put("randomResponse", "A")
+          .put("randomRight", false)
+          .put("wrong", 1);
+    }
+    activity.start(false, true);
+    layout();
+    ArrayList<JSONObject> previous = new ArrayList<>(activity.questions);
+    JSONObject answered = previous.get(0);
+    answered.put("response", "AB").put("right", true);
+    JSONObject inProgress = previous.get(1);
+    inProgress.remove("randomResponse");
+    inProgress.remove("randomRight");
+    activity.practice();
+    activity.move(1);
+    settle();
+    assertEquals(1, activity.index);
+    activity.practicePages.get(1).view.findViewWithTag("B").performClick();
+    assertEquals("B", activity.pendingAnswers.get(activity.id(inProgress)));
+
+    withText(activity.bar, "⋮").performClick();
+    AlertDialog menu = ShadowAlertDialog.getLatestAlertDialog();
+    assertTrue(withText(menu.getWindow().getDecorView(), "重新随机").performClick());
+    assertFalse(menu.isShowing());
+    AlertDialog confirmation = ShadowAlertDialog.getLatestAlertDialog();
+    confirmation.getButton(AlertDialog.BUTTON_NEGATIVE).performClick();
+    shadowOf(Looper.getMainLooper()).idle();
+    assertEquals(previous, activity.questions);
+    assertEquals("A", activity.answer(answered));
+
+    withText(activity.bar, "⋮").performClick();
+    menu = ShadowAlertDialog.getLatestAlertDialog();
+    withText(menu.getWindow().getDecorView(), "重新随机").performClick();
+    ShadowAlertDialog.getLatestAlertDialog().getButton(AlertDialog.BUTTON_POSITIVE).performClick();
+    shadowOf(Looper.getMainLooper()).idle();
+    assertNotEquals(previous, activity.questions);
+    assertEquals(new HashSet<>(previous), new HashSet<>(activity.questions));
+    assertEquals(0, activity.index);
+    assertEquals("", activity.answer(answered));
+    assertFalse(answered.has("randomRight"));
+    assertEquals("AB", answered.getString("response"));
+    assertTrue(answered.getBoolean("right"));
+    assertEquals(1, answered.getInt("wrong"));
+    assertTrue(activity.pendingAnswers.isEmpty());
+    assertEquals("已做 0/4", activity.progressLabel.getText().toString());
+    String stored = new String(java.nio.file.Files.readAllBytes(
+        new java.io.File(activity.getFilesDir(), "banks.json").toPath()), StandardCharsets.UTF_8);
+    assertFalse(stored.contains("randomResponse"));
+    assertFalse(stored.contains("randomRight"));
+
+    ArrayList<JSONObject> reshuffled = new ArrayList<>(activity.questions);
+    activity.bankPage();
+    activity.start(false, true);
+    assertEquals(reshuffled, activity.questions);
+    assertEquals(0, activity.index);
+    assertEquals("", activity.answer(answered));
   }
 
   @Test

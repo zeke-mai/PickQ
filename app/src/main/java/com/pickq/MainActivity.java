@@ -960,15 +960,19 @@ public class MainActivity extends Activity {
   boolean randomPractice;
   String practicePositionKey;
 
-  void start(boolean wrong) { start(wrong, false); }
-  void start(boolean wrong, boolean random) {
-    randomPractice = random;
+  void loadPracticeQuestions(boolean wrong) {
     questions.clear();
     JSONArray qs = bank.optJSONArray("questions");
     for (int i = 0; i < qs.length(); i++) {
       JSONObject q = qs.optJSONObject(i);
       if (!wrong || q.optInt("wrong") > 0) questions.add(q);
     }
+  }
+
+  void start(boolean wrong) { start(wrong, false); }
+  void start(boolean wrong, boolean random) {
+    randomPractice = random;
+    loadPracticeQuestions(wrong);
     if (questions.isEmpty()) {
       toast("暂无错题");
       return;
@@ -986,6 +990,29 @@ public class MainActivity extends Activity {
     int position = wrong ? 0 : prefs.getInt(practicePositionKey, random ? 0 : bank.optInt("position"));
     index = Math.max(0, Math.min(position, questions.size() - 1));
     pendingAnswers.clear();
+    practice();
+  }
+
+  void reshufflePractice() {
+    List<JSONObject> previous = new ArrayList<>(questions);
+    Random random = new Random();
+    long seed;
+    do {
+      seed = random.nextLong();
+      loadPracticeQuestions(false);
+      Collections.shuffle(questions, new Random(seed));
+    } while (questions.size() > 1 && questions.equals(previous));
+    for (JSONObject q : questions) {
+      q.remove("randomResponse");
+      q.remove("randomRight");
+    }
+    pendingAnswers.clear();
+    save();
+    index = 0;
+    prefs.edit()
+        .putLong("randomSeed:" + bank.optString("id"), seed)
+        .putInt(practicePositionKey, index)
+        .apply();
     practice();
   }
 
@@ -1817,7 +1844,7 @@ public class MainActivity extends Activity {
       String marker = "";
       if (showResult) {
         if (expectedAnswer.contains(key)) {
-          if (multi) marker = selected ? "选对" : "漏选";
+          if (multi && !selected) marker = "漏选";
           background = selected || !multi ? 0xffc9f0db : 0xffffe5b4;
           foreground = selected || !multi ? 0xff14683c : 0xff7c4a00;
         } else if (selected) {
@@ -1852,11 +1879,16 @@ public class MainActivity extends Activity {
     pendingAnswers.remove(id(q));
     saveWhenIdle();
     practice();
+    int revision = pageRevision;
     if (ok && prefs.getBoolean("auto", false) && index + 1 < questions.size())
       ui
           .postDelayed(
               () -> {
-                if (screen.equals("practice") && !exam && questionOverview == null && questions.get(index) == q)
+                if (revision == pageRevision
+                    && screen.equals("practice")
+                    && !exam
+                    && questionOverview == null
+                    && questions.get(index) == q)
                   move(1);
               },
               100);
@@ -1893,6 +1925,19 @@ public class MainActivity extends Activity {
             .setPositiveButton("关闭", (x, w) -> practice())
             .create();
     if (!exam) {
+      if (randomPractice)
+        box.addView(
+            button(
+                "重新随机",
+                () -> {
+                  d.dismiss();
+                  new AlertDialog.Builder(this)
+                      .setTitle("重新随机")
+                      .setMessage("清空本题库的随机练习作答记录，重新打乱题序并从第 1 题开始？")
+                      .setNegativeButton("取消", null)
+                      .setPositiveButton("开始新一轮", (dialog, which) -> reshufflePractice())
+                      .show();
+                }));
       box.addView(
           button(
               "试题编辑",
