@@ -151,10 +151,12 @@ public class InteractionTest {
     submit.performClick();
 
     page = activity.practicePages.get(0).view;
-    assertNotNull(withText(page, "A  Three  ·  错选"));
+    assertNotNull(withText(page, "A  Three"));
+    assertNotNull(withText((View) page.findViewWithTag("C").getParent(), "× 错选"));
     assertNotNull(withText(page, "B  One"));
     assertEquals(0xff14683c, ((Button) page.findViewWithTag("A")).getCurrentTextColor());
-    assertNotNull(withText(page, "C  Two  ·  漏选"));
+    assertNotNull(withText(page, "C  Two"));
+    assertNotNull(withText((View) page.findViewWithTag("B").getParent(), "+ 漏选"));
     assertNotNull(withText(page, "参考答案：BC\n解析："));
     assertEquals(0xffc62828, ((Button) page.findViewWithTag("C")).getCurrentTextColor());
     assertEquals("CA", question.getString("response"));

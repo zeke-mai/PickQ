@@ -371,11 +371,12 @@ public class MainActivity extends Activity {
     bar.addView(
         button(
             "⋮",
-            () ->
-                new AlertDialog.Builder(this)
-                    .setTitle("文件夹设置")
-                    .setItems(new String[] {"删除文件夹"}, (d, w) -> deleteFolder(name))
-                    .show()));
+            () -> {
+              LinearLayout box = settingsContent();
+              AlertDialog dialog = settingsDialog("文件夹设置", box, "关闭", null);
+              settingsAction(box, dialog, "删除文件夹", true, () -> deleteFolder(name));
+              dialog.show();
+            }));
     int count = 0;
     for (JSONObject item : sortedBanks())
       if (name.equals(item.optString("folder"))) {
@@ -458,17 +459,12 @@ public class MainActivity extends Activity {
   }
 
   void bankSettings() {
-    new AlertDialog.Builder(this)
-        .setTitle("题库设置")
-        .setItems(
-            new String[] {"编辑题库名字", "移动至文件夹", "删除题库"},
-            (d, which) -> {
-              if (which == 0) renameBank();
-              else if (which == 1) moveBank();
-              else deleteBank();
-            })
-        .setNegativeButton("取消", null)
-        .show();
+    LinearLayout box = settingsContent();
+    AlertDialog dialog = settingsDialog("题库设置", box, "关闭", null);
+    settingsAction(box, dialog, "编辑题库名字", false, this::renameBank);
+    settingsAction(box, dialog, "移动至文件夹", false, this::moveBank);
+    settingsAction(box, dialog, "删除题库", true, this::deleteBank);
+    dialog.show();
   }
 
   void deleteBank() {
@@ -1200,7 +1196,7 @@ public class MainActivity extends Activity {
         b.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
         LinearLayout.LayoutParams optionLayout = new LinearLayout.LayoutParams(-1, -2);
         optionLayout.setMargins(0, dp(5), 0, dp(5));
-        front.addView(b, optionLayout);
+        front.addView(new OptionRow(b), optionLayout);
       }
       refreshOptions(front, q);
       if (multiple(q) && !review) {
@@ -1827,6 +1823,25 @@ public class MainActivity extends Activity {
     }
   }
 
+  final class OptionRow extends LinearLayout {
+    final Button option;
+    final TextView status;
+
+    OptionRow(Button option) {
+      super(MainActivity.this);
+      this.option = option;
+      setGravity(Gravity.CENTER_VERTICAL);
+      addView(option, new LayoutParams(0, -2, 1f));
+      status = label("", 13);
+      status.setTypeface(null, android.graphics.Typeface.BOLD);
+      status.setPadding(dp(10), dp(5), dp(10), dp(5));
+      status.setVisibility(View.GONE);
+      LayoutParams statusLayout = new LayoutParams(-2, -2);
+      statusLayout.setMarginStart(dp(8));
+      addView(status, statusLayout);
+    }
+  }
+
   void refreshOptions(LinearLayout front, JSONObject q) {
     String expectedAnswer = q.optString("answer");
     boolean showResult = !expectedAnswer.isEmpty() && ((!exam && !answer(q).isEmpty()) || review);
@@ -1835,8 +1850,9 @@ public class MainActivity extends Activity {
     int displayedIndex = 0;
     for (int i = 0; i < front.getChildCount(); i++) {
       View v = front.getChildAt(i);
-      if (!(v instanceof Button) || !(v.getTag() instanceof String)) continue;
-      Button option = (Button) v;
+      if (!(v instanceof OptionRow)) continue;
+      OptionRow row = (OptionRow) v;
+      Button option = row.option;
       String key = (String) option.getTag();
       boolean selected = draft.contains(key);
       int background = selected ? 0xffdbe5ff : 0xfff3f5f9;
@@ -1844,18 +1860,24 @@ public class MainActivity extends Activity {
       String marker = "";
       if (showResult) {
         if (expectedAnswer.contains(key)) {
-          if (multi && !selected) marker = "漏选";
+          if (multi && !selected) marker = "+ 漏选";
           background = selected || !multi ? 0xffc9f0db : 0xffffe5b4;
           foreground = selected || !multi ? 0xff14683c : 0xff7c4a00;
         } else if (selected) {
-          if (multi) marker = "错选";
+          if (multi) marker = "× 错选";
           background = 0xffffd7d7;
           foreground = 0xffc62828;
         }
       }
       char letter = (char) ('A' + displayedIndex++);
       String content = options.optString(key);
-      option.setText(letter + "  " + content + (marker.isEmpty() ? "" : "  ·  " + marker));
+      option.setText(letter + "  " + content);
+      row.status.setVisibility(marker.isEmpty() ? View.GONE : View.VISIBLE);
+      if (!marker.isEmpty()) {
+        row.status.setText(marker);
+        row.status.setTextColor(Color.WHITE);
+        row.status.setBackground(bg(foreground));
+      }
       option.setSelected(selected);
       option.setTextColor(foreground);
       option.setBackground(bg(background));
@@ -1902,6 +1924,52 @@ public class MainActivity extends Activity {
     settlePages(delta);
   }
 
+  LinearLayout settingsContent() {
+    LinearLayout box = new LinearLayout(this);
+    box.setPadding(dp(20), dp(8), dp(20), dp(4));
+    box.setOrientation(LinearLayout.VERTICAL);
+    return box;
+  }
+
+  AlertDialog settingsDialog(
+      String title, LinearLayout box, String done, DialogInterface.OnClickListener listener) {
+    ScrollView scroll = new ScrollView(this);
+    scroll.addView(box);
+    return new AlertDialog.Builder(this)
+        .setTitle(title)
+        .setView(scroll)
+        .setPositiveButton(done, listener)
+        .create();
+  }
+
+  void settingsRow(LinearLayout box, TextView row, int foreground, int background) {
+    row.setTextSize(15);
+    row.setTextColor(foreground);
+    row.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+    row.setMinHeight(dp(48));
+    row.setPaddingRelative(dp(14), dp(8), dp(14), dp(8));
+    row.setBackground(
+        new android.graphics.drawable.RippleDrawable(
+            android.content.res.ColorStateList.valueOf(0x22315cdb), bg(background), null));
+    LinearLayout.LayoutParams layout = new LinearLayout.LayoutParams(-1, -2);
+    layout.bottomMargin = dp(6);
+    box.addView(row, layout);
+  }
+
+  void settingsAction(
+      LinearLayout box, AlertDialog dialog, String title, boolean destructive, Runnable action) {
+    Button row = button(
+        title,
+        () -> {
+          if (dialog != null) dialog.dismiss();
+          action.run();
+        });
+    settingsRow(
+        box, row,
+        destructive ? 0xffa61d2d : 0xff263650,
+        destructive ? 0xffffeff0 : 0xfff3f5f9);
+  }
+
   void toggle(LinearLayout box, String title, String key) {
     Switch s = new Switch(this);
     s.setText(title);
@@ -1911,62 +1979,38 @@ public class MainActivity extends Activity {
           prefs.edit().putBoolean(key, v).apply();
           orders.clear();
         });
-    box.addView(s);
+    settingsRow(box, s, 0xff263650, 0xfff3f5f9);
   }
 
   void practiceMenu() {
-    LinearLayout box = new LinearLayout(this);
-    box.setPadding(dp(20), dp(10), dp(20), dp(10));
-    box.setOrientation(LinearLayout.VERTICAL);
+    LinearLayout box = settingsContent();
     AlertDialog d =
-        new AlertDialog.Builder(this)
-            .setTitle("练习设置")
-            .setView(box)
-            .setPositiveButton("关闭", (x, w) -> practice())
-            .create();
+        settingsDialog(exam ? "考试设置" : "练习设置", box, "关闭", (x, w) -> practice());
+    if (!exam) toggle(box, "答对自动跳转", "auto");
+    toggle(box, "选项乱序", exam ? "examShuffle" : "shuffle");
     if (!exam) {
       if (randomPractice)
-        box.addView(
-            button(
-                "重新随机",
-                () -> {
-                  d.dismiss();
-                  new AlertDialog.Builder(this)
-                      .setTitle("重新随机")
-                      .setMessage("清空本题库的随机练习作答记录，重新打乱题序并从第 1 题开始？")
-                      .setNegativeButton("取消", null)
-                      .setPositiveButton("开始新一轮", (dialog, which) -> reshufflePractice())
-                      .show();
-                }));
-      box.addView(
-          button(
-              "试题编辑",
-              () -> {
-                d.dismiss();
-                edit();
-              }));
-      box.addView(
-          button(
-              "重练本题",
-              () -> {
-                JSONObject q = questions.get(index);
-                pendingAnswers.remove(id(q));
-                q.remove(responseKey());
-                q.remove(rightKey());
-                save();
-                d.dismiss();
-                practice();
-              }));
-      toggle(box, "答对自动跳转", "auto");
+        settingsAction(
+            box, d, "重新随机", false,
+            () -> new AlertDialog.Builder(this)
+                .setTitle("重新随机")
+                .setMessage("清空本题库的随机练习作答记录，重新打乱题序并从第 1 题开始？")
+                .setNegativeButton("取消", null)
+                .setPositiveButton("开始新一轮", (dialog, which) -> reshufflePractice())
+                .show());
+      settingsAction(box, d, "试题编辑", false, this::edit);
+      settingsAction(
+          box, d, "重练本题", false,
+          () -> {
+            JSONObject q = questions.get(index);
+            pendingAnswers.remove(id(q));
+            q.remove(responseKey());
+            q.remove(rightKey());
+            save();
+            practice();
+          });
     }
-    toggle(box, "选项乱序", exam ? "examShuffle" : "shuffle");
-    box.addView(
-        button(
-            "返回题库",
-            () -> {
-              d.dismiss();
-              onBackPressed();
-            }));
+    settingsAction(box, d, "返回题库", false, this::onBackPressed);
     d.show();
   }
 
@@ -2148,36 +2192,31 @@ public class MainActivity extends Activity {
   }
 
   void settings() {
-    LinearLayout box = new LinearLayout(this);
-    box.setOrientation(LinearLayout.VERTICAL);
+    LinearLayout box = settingsContent();
     toggle(box, "启动时检查更新", "updates");
     EditText repo = new EditText(this);
-    repo.setHint("GitHub 账号/仓库（公开发布仓库）");
+    repo.setHint("GitHub 账号/仓库");
+    repo.setSingleLine(true);
     repo.setText(prefs.getString("repo", BuildConfig.UPDATE_REPO));
-    box.addView(repo);
-    box.addView(
-        button(
-            "检查更新",
-            () -> {
-              prefs.edit().putString("repo", repo.getText().toString().trim()).apply();
-              checkUpdate(true);
-            }));
-    box.addView(
-        button(
-            "从本地 APK 更新",
-            () -> {
-              Intent choose =
-                  new Intent(Intent.ACTION_OPEN_DOCUMENT)
-                      .setType("application/vnd.android.package-archive");
-              choose.addCategory(Intent.CATEGORY_OPENABLE);
-              startActivityForResult(choose, 3);
-            }));
-    new AlertDialog.Builder(this)
-        .setTitle("总设置 · v" + BuildConfig.VERSION_NAME)
-        .setView(box)
-        .setPositiveButton(
-            "保存",
-            (d, w) -> prefs.edit().putString("repo", repo.getText().toString().trim()).apply())
+    settingsRow(box, repo, 0xff263650, 0xfff3f5f9);
+    settingsAction(
+        box, null, "检查更新", false,
+        () -> {
+          prefs.edit().putString("repo", repo.getText().toString().trim()).apply();
+          checkUpdate(true);
+        });
+    settingsAction(
+        box, null, "从本地 APK 更新", false,
+        () -> {
+          Intent choose =
+              new Intent(Intent.ACTION_OPEN_DOCUMENT)
+                  .setType("application/vnd.android.package-archive");
+          choose.addCategory(Intent.CATEGORY_OPENABLE);
+          startActivityForResult(choose, 3);
+        });
+    settingsDialog(
+        "总设置 · v" + BuildConfig.VERSION_NAME, box, "保存",
+        (d, w) -> prefs.edit().putString("repo", repo.getText().toString().trim()).apply())
         .show();
   }
 
