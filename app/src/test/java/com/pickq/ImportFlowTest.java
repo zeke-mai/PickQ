@@ -260,7 +260,7 @@ public class ImportFlowTest {
     JSONArray qs =
         new JSONArray().put(activity.importedQuestion(ImportReview.check(row("考试题", "A")).row));
     activity.bank = new JSONObject().put("id", "exam").put("questions", qs).put("name", "考试");
-    activity.start(false);
+    activity.startPractice(false);
     activity.exam = true;
     activity.practice();
     activity.onNewIntent(

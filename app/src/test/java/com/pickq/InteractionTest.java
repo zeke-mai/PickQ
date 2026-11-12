@@ -106,7 +106,7 @@ public class InteractionTest {
     JSONObject question = activity.bank.getJSONArray("questions").getJSONObject(0);
     question.getJSONObject("options").put("C", "Three");
     question.put("chapter", "不显示的章节");
-    activity.start(false);
+    activity.startPractice(false);
     activity.orders.put("q0", Arrays.asList("C", "A", "B"));
     activity.practice();
     View page = activity.practicePages.get(0).view;
@@ -167,7 +167,7 @@ public class InteractionTest {
   public void singleChoiceUsesGreenForCorrectAndRedForWrongWithoutOptionMarkers() throws Exception {
     JSONObject question = activity.bank.getJSONArray("questions").getJSONObject(0);
     question.put("type", "单选题").put("answer", "A");
-    activity.start(false);
+    activity.startPractice(false);
     View page = activity.practicePages.get(0).view;
     page.findViewWithTag("B").performClick();
     page = activity.practicePages.get(0).view;
@@ -189,7 +189,7 @@ public class InteractionTest {
   public void judgmentUsesColorsWithoutMissedOptionText() throws Exception {
     JSONObject question = activity.bank.getJSONArray("questions").getJSONObject(0);
     question.put("type", "判断题").put("answer", "A");
-    activity.start(false);
+    activity.startPractice(false);
     activity.practicePages.get(0).view.findViewWithTag("B").performClick();
     View page = activity.practicePages.get(0).view;
     Button correct = page.findViewWithTag("A"), wrong = page.findViewWithTag("B");
@@ -201,7 +201,7 @@ public class InteractionTest {
 
   @Test
   public void submitLabelFitsAndHasSpaceFromSelectAllOnNarrowScreen() {
-    activity.start(false);
+    activity.startPractice(false);
     View page = activity.practicePages.get(0).view;
     page.measure(
         View.MeasureSpec.makeMeasureSpec(activity.dp(300), View.MeasureSpec.EXACTLY),
@@ -229,7 +229,7 @@ public class InteractionTest {
     JSONArray questions = activity.bank.getJSONArray("questions");
     questions.getJSONObject(0).put("response", "AB").put("right", true);
     questions.getJSONObject(1).put("response", "A").put("right", false);
-    activity.start(false);
+    activity.startPractice(false);
     layout();
     assertNull(withText(activity.resultBar, "题号总览"));
     View firstCounter = activity.resultStats.getChildAt(0);
@@ -261,7 +261,7 @@ public class InteractionTest {
 
   @Test
   public void footerSwipeOpensOverviewWithoutRevealingExamResults() {
-    activity.start(false);
+    activity.startPractice(false);
     activity.exam = true;
     activity.examAnswers.put("q0", "A");
     activity.practice();
@@ -289,7 +289,7 @@ public class InteractionTest {
 
   @Test
   public void draggingOverviewDownFadesShadeAndClosesIt() {
-    activity.start(false);
+    activity.startPractice(false);
     layout();
     activity.showQuestionOverview();
     MainActivity.OverviewPanel panel = (MainActivity.OverviewPanel) overviewNumbers().getParent();
@@ -316,7 +316,7 @@ public class InteractionTest {
 
   @Test
   public void tappingOutsideFadesOverviewBeforeDismissal() {
-    activity.start(false);
+    activity.startPractice(false);
     layout();
     activity.showQuestionOverview();
     settle();
@@ -360,11 +360,11 @@ public class InteractionTest {
     activity.move(1);
     settle();
     assertEquals(1, activity.index);
-    activity.start(false);
+    activity.startPractice(false);
     assertEquals(2, activity.index);
     assertEquals("AB", activity.answer(existing));
     assertEquals("已做 1/4", activity.progressLabel.getText().toString());
-    activity.start(false, true);
+    activity.startPractice(true);
     assertEquals(randomOrder, activity.questions);
     assertEquals(1, activity.index);
     assertEquals("A", activity.answer(answeredRandomly));
@@ -378,7 +378,7 @@ public class InteractionTest {
           .put("randomRight", false)
           .put("wrong", 1);
     }
-    activity.start(false, true);
+    activity.startPractice(true);
     layout();
     ArrayList<JSONObject> previous = new ArrayList<>(activity.questions);
     JSONObject answered = previous.get(0);
@@ -425,19 +425,19 @@ public class InteractionTest {
 
     ArrayList<JSONObject> reshuffled = new ArrayList<>(activity.questions);
     activity.bankPage();
-    activity.start(false, true);
+    activity.startPractice(true);
     assertEquals(reshuffled, activity.questions);
     assertEquals(0, activity.index);
     assertEquals("", activity.answer(answered));
   }
 
   @Test
-  public void wrongListIncludesRandomMistakesAndOpensTheSortedQuestion() throws Exception {
+  public void wrongListShowsRandomMistakeStemAndStaysOpenAfterClosingIt() throws Exception {
     JSONArray bankQuestions = activity.bank.getJSONArray("questions");
     JSONObject mostMissed = bankQuestions.getJSONObject(3);
     mostMissed.put("wrong", 3);
     JSONObject randomMiss = bankQuestions.getJSONObject(0);
-    activity.start(false, true);
+    activity.startPractice(true);
     activity.index = activity.questions.indexOf(randomMiss);
     activity.practice();
     activity.draft = "A";
@@ -451,15 +451,23 @@ public class InteractionTest {
     assertEquals(1, title.getMaxLines());
     assertEquals(android.text.TextUtils.TruncateAt.END, title.getEllipsize());
     assertNotNull(withText(randomRow, "错 1 次"));
+    View list = activity.root;
     assertTrue(randomRow.performClick());
-    assertEquals(Arrays.asList(mostMissed, randomMiss), activity.questions);
-    assertSame(randomMiss, activity.questions.get(activity.index));
+    AlertDialog detail = ShadowAlertDialog.getLatestAlertDialog();
+    assertEquals(randomMiss.getString("title"), shadowOf(detail).getMessage());
+    assertNull(withText(detail.getWindow().getDecorView(), "提交答案"));
+    detail.getButton(AlertDialog.BUTTON_POSITIVE).performClick();
+    shadowOf(Looper.getMainLooper()).idle();
+    assertFalse(detail.isShowing());
+    assertEquals("wrong", activity.screen);
+    assertSame(list, activity.root);
+    assertSame(randomRow, activity.body.getChildAt(1));
   }
 
   @Test
   public void correctAnswerStartsAutomaticTurnWithin120Milliseconds() {
     activity.prefs.edit().putBoolean("auto", true).commit();
-    activity.start(false);
+    activity.startPractice(false);
     layout();
     activity.draft = "AB";
     activity.submit(activity.questions.get(0));
@@ -505,7 +513,7 @@ public class InteractionTest {
 
   @Test
   public void repeatedTurnsReusePreparedPageAndKeepMenus() throws Exception {
-    activity.start(false);
+    activity.startPractice(false);
     layout();
     FrameLayout viewport = activity.practiceViewport;
     View top = activity.bar, bottom = activity.resultBar;
@@ -531,7 +539,7 @@ public class InteractionTest {
 
   @Test
   public void boundaryBounceDoesNotTurnOrExposeOtherPages() {
-    activity.start(false);
+    activity.startPractice(false);
     layout();
     activity.dragPages(200);
     assertEquals(View.INVISIBLE, activity.practicePages.get(1).view.getVisibility());
@@ -544,7 +552,7 @@ public class InteractionTest {
 
   @Test
   public void pauseFlushesDeferredAnswerSave() throws Exception {
-    activity.start(false);
+    activity.startPractice(false);
     layout();
     activity.draft = "A";
     activity.record(activity.questions.get(0), false);
@@ -562,7 +570,7 @@ public class InteractionTest {
 
   @Test
   public void repeatedSwipeRequestsCannotSkipQuestions() {
-    activity.start(false);
+    activity.startPractice(false);
     layout();
     activity.move(1);
     activity.move(1);
@@ -572,7 +580,7 @@ public class InteractionTest {
 
   @Test
   public void cancelledTransitionCannotChangeResetPage() {
-    activity.start(false);
+    activity.startPractice(false);
     layout();
     activity.move(1);
     activity.practice();
@@ -583,7 +591,7 @@ public class InteractionTest {
 
   @Test
   public void gestureFollowsFingerAndDoesNotSelectOption() {
-    activity.start(false);
+    activity.startPractice(false);
     layout();
     long time = android.os.SystemClock.uptimeMillis();
     touch(time, time, android.view.MotionEvent.ACTION_DOWN, 700, 180);
@@ -599,7 +607,7 @@ public class InteractionTest {
 
   @Test
   public void shortFastFlickUsesScreenVelocity() {
-    activity.start(false);
+    activity.startPractice(false);
     layout();
     long time = android.os.SystemClock.uptimeMillis();
     touch(time, time, android.view.MotionEvent.ACTION_DOWN, 700, 180);
@@ -633,7 +641,7 @@ public class InteractionTest {
 
   @Test
   public void examReviewReplacesSubmissionFooter() {
-    activity.start(false);
+    activity.startPractice(false);
     layout();
     activity.exam = true;
     activity.practice();
@@ -647,7 +655,7 @@ public class InteractionTest {
 
   @Test
   public void questionBackButtonConfirmsExitDuringAnExam() {
-    activity.start(false);
+    activity.startPractice(false);
     activity.exam = true;
     activity.practice();
     View back = activity.bar.getChildAt(0);

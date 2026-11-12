@@ -947,8 +947,8 @@ public class MainActivity extends Activity {
     bar.addView(button("‹", () -> home()), 0);
     bar.getChildAt(0).setContentDescription("返回主界面");
     bar.addView(button("⋮", () -> bankSettings()));
-    card("顺序练习", "继续上次进度 · 即时解析", () -> start(false));
-    card("随机练习", "随机题序 · 继续上次进度", () -> start(false, true));
+    card("顺序练习", "继续上次进度 · 即时解析", () -> startPractice(false));
+    card("随机练习", "随机题序 · 继续上次进度", () -> startPractice(true));
     card("模拟考试", "按题型抽题 · 交卷后查看答案", () -> examSetup());
     card("错题集", "查看累计错题与错误次数", () -> wrongPage());
   }
@@ -956,40 +956,30 @@ public class MainActivity extends Activity {
   boolean randomPractice;
   String practicePositionKey;
 
-  void loadPracticeQuestions(boolean wrong) {
+  void loadPracticeQuestions() {
     questions.clear();
     JSONArray qs = bank.optJSONArray("questions");
-    for (int i = 0; i < qs.length(); i++) {
-      JSONObject q = qs.optJSONObject(i);
-      if (!wrong || q.optInt("wrong") > 0) questions.add(q);
-    }
-    if (wrong) questions.sort(Comparator.comparingInt((JSONObject q) -> q.optInt("wrong")).reversed());
+    for (int i = 0; i < qs.length(); i++) questions.add(qs.optJSONObject(i));
   }
 
-  void start(boolean wrong) { start(wrong, false); }
-  void start(boolean wrong, boolean random) {
-    start(wrong, random, null);
-  }
-
-  void start(boolean wrong, boolean random, JSONObject target) {
+  void startPractice(boolean random) {
     randomPractice = random;
-    loadPracticeQuestions(wrong);
+    loadPracticeQuestions();
     if (questions.isEmpty()) {
-      toast("暂无错题");
+      toast("题库暂无题目");
       return;
     }
     exam = false;
     review = false;
     orders.clear();
     String bankId = bank.optString("id");
-    practicePositionKey = wrong ? null : (random ? "randomPosition:" : "position:") + bankId;
+    practicePositionKey = (random ? "randomPosition:" : "position:") + bankId;
     if (random) {
       String seedKey = "randomSeed:" + bankId;
       if (!prefs.contains(seedKey)) prefs.edit().putLong(seedKey, new Random().nextLong()).apply();
       Collections.shuffle(questions, new Random(prefs.getLong(seedKey, 0)));
     }
-    int position = wrong ? questions.indexOf(target)
-        : prefs.getInt(practicePositionKey, random ? 0 : bank.optInt("position"));
+    int position = prefs.getInt(practicePositionKey, random ? 0 : bank.optInt("position"));
     index = Math.max(0, Math.min(position, questions.size() - 1));
     pendingAnswers.clear();
     practice();
@@ -1001,7 +991,7 @@ public class MainActivity extends Activity {
     long seed;
     do {
       seed = random.nextLong();
-      loadPracticeQuestions(false);
+      loadPracticeQuestions();
       Collections.shuffle(questions, new Random(seed));
     } while (questions.size() > 1 && questions.equals(previous));
     for (JSONObject q : questions) {
@@ -1024,9 +1014,15 @@ public class MainActivity extends Activity {
     Button back = button("‹", this::bankPage);
     back.setContentDescription("返回题库");
     bar.addView(back, 0);
-    loadPracticeQuestions(true);
-    if (questions.isEmpty()) body.addView(label("暂无错题", 15));
-    for (JSONObject q : questions) {
+    List<JSONObject> mistakes = new ArrayList<>();
+    JSONArray qs = bank.optJSONArray("questions");
+    for (int i = 0; i < qs.length(); i++) {
+      JSONObject q = qs.optJSONObject(i);
+      if (q.optInt("wrong") > 0) mistakes.add(q);
+    }
+    mistakes.sort(Comparator.comparingInt((JSONObject q) -> q.optInt("wrong")).reversed());
+    if (mistakes.isEmpty()) body.addView(label("暂无错题", 15));
+    for (JSONObject q : mistakes) {
       LinearLayout row = new LinearLayout(this);
       row.setGravity(Gravity.CENTER_VERTICAL);
       row.setMinimumHeight(dp(48));
@@ -1041,7 +1037,11 @@ public class MainActivity extends Activity {
       count.setTextColor(0xffa61d2d);
       row.addView(count);
       row.setFocusable(true);
-      row.setOnClickListener(v -> start(true, false, q));
+      row.setOnClickListener(v ->
+          new AlertDialog.Builder(this)
+              .setMessage(q.optString("title"))
+              .setPositiveButton("关闭", null)
+              .show());
       LinearLayout.LayoutParams layout = new LinearLayout.LayoutParams(-1, -2);
       layout.bottomMargin = dp(6);
       body.addView(row, layout);
