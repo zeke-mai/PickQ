@@ -1037,15 +1037,34 @@ public class MainActivity extends Activity {
       count.setTextColor(0xffa61d2d);
       row.addView(count);
       row.setFocusable(true);
-      row.setOnClickListener(v ->
-          new AlertDialog.Builder(this)
-              .setMessage(q.optString("title"))
-              .setPositiveButton("关闭", null)
-              .show());
+      row.setOnClickListener(v -> showMistake(q));
       LinearLayout.LayoutParams layout = new LinearLayout.LayoutParams(-1, -2);
       layout.bottomMargin = dp(6);
       body.addView(row, layout);
     }
+  }
+
+  void showMistake(JSONObject q) {
+    LinearLayout box = settingsContent();
+    box.addView(label(q.optString("title"), 17));
+    JSONObject options = q.optJSONObject("options");
+    if (options != null) {
+      for (char letter = 'A'; letter <= 'H'; letter++) {
+        String option = options.optString(String.valueOf(letter));
+        if (!option.isEmpty()) {
+          TextView row = label(letter + "  " + option, 15);
+          row.setBackground(bg(0xfff3f5f9));
+          LinearLayout.LayoutParams layout = new LinearLayout.LayoutParams(-1, -2);
+          layout.bottomMargin = dp(6);
+          box.addView(row, layout);
+        }
+      }
+    }
+    String reference = q.optString("answer");
+    TextView answer = label("参考答案：" + (reference.isEmpty() ? "未提供" : reference), 16);
+    answer.setTextColor(0xff14683c);
+    box.addView(answer);
+    settingsDialog("错题详情", box, "关闭", null).show();
   }
 
   boolean choice(JSONObject q) {
@@ -1275,9 +1294,23 @@ public class MainActivity extends Activity {
       actions.addView(submit, new LinearLayout.LayoutParams(-2, -2));
       if (multiple(q)) actions.addView(new Space(this), new LinearLayout.LayoutParams(0, 1, 1));
     }
-    if ((!exam && !answer(q).isEmpty()) || review)
-      body.addView(
-          label("参考答案：" + displayedChoice(q, q.optString("answer")) + "\n解析：" + q.optString("explanation"), 16));
+    if ((!exam && !answer(q).isEmpty()) || review) {
+      String reference = displayedChoice(q, q.optString("answer"));
+      if (review) {
+        body.addView(label("参考答案：" + reference + "\n解析：" + q.optString("explanation"), 16));
+      } else {
+        TextView referenceLine = label("参考答案：" + (reference.isEmpty() ? "未提供" : reference), 16);
+        referenceLine.setTextColor(0xff14683c);
+        referenceLine.setPadding(dp(12), dp(8), dp(12), dp(3));
+        body.addView(referenceLine);
+        TextView selectedLine = label("选择答案：" + displayedChoice(q, answer(q)), 16);
+        selectedLine.setTextColor(0xffa61d2d);
+        selectedLine.setPadding(dp(12), dp(3), dp(12), dp(8));
+        body.addView(selectedLine);
+        String explanation = q.optString("explanation");
+        if (!explanation.isEmpty()) body.addView(label("解析：" + explanation, 16));
+      }
+    }
 
     draft = previousDraft;
     return new PracticePage(scroll);

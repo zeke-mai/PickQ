@@ -157,7 +157,10 @@ public class InteractionTest {
     assertEquals(0xff14683c, ((Button) page.findViewWithTag("A")).getCurrentTextColor());
     assertNotNull(withText(page, "C  Two"));
     assertNotNull(withText((View) page.findViewWithTag("B").getParent(), "+ 漏选"));
-    assertNotNull(withText(page, "参考答案：BC\n解析："));
+    TextView reference = (TextView) withText(page, "参考答案：BC");
+    TextView selected = (TextView) withText(page, "选择答案：AB");
+    assertEquals(0xff14683c, reference.getCurrentTextColor());
+    assertEquals(0xffa61d2d, selected.getCurrentTextColor());
     assertEquals(0xffc62828, ((Button) page.findViewWithTag("C")).getCurrentTextColor());
     assertEquals("CA", question.getString("response"));
     assertFalse(question.getBoolean("right"));
@@ -432,7 +435,7 @@ public class InteractionTest {
   }
 
   @Test
-  public void wrongListShowsRandomMistakeStemAndStaysOpenAfterClosingIt() throws Exception {
+  public void wrongListShowsReferenceWithoutSelectedAnswerAndStaysOpen() throws Exception {
     JSONArray bankQuestions = activity.bank.getJSONArray("questions");
     JSONObject mostMissed = bankQuestions.getJSONObject(3);
     mostMissed.put("wrong", 3);
@@ -454,8 +457,13 @@ public class InteractionTest {
     View list = activity.root;
     assertTrue(randomRow.performClick());
     AlertDialog detail = ShadowAlertDialog.getLatestAlertDialog();
-    assertEquals(randomMiss.getString("title"), shadowOf(detail).getMessage());
-    assertNull(withText(detail.getWindow().getDecorView(), "提交答案"));
+    View content = detail.getWindow().getDecorView();
+    assertNotNull(withText(content, randomMiss.getString("title")));
+    assertNotNull(withText(content, "A  One"));
+    assertNotNull(withText(content, "B  Two"));
+    assertNotNull(withText(content, "参考答案：AB"));
+    assertNull(withText(content, "选择答案：A"));
+    assertNull(withText(content, "提交答案"));
     detail.getButton(AlertDialog.BUTTON_POSITIVE).performClick();
     shadowOf(Looper.getMainLooper()).idle();
     assertFalse(detail.isShowing());
