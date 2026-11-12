@@ -432,6 +432,31 @@ public class InteractionTest {
   }
 
   @Test
+  public void wrongListIncludesRandomMistakesAndOpensTheSortedQuestion() throws Exception {
+    JSONArray bankQuestions = activity.bank.getJSONArray("questions");
+    JSONObject mostMissed = bankQuestions.getJSONObject(3);
+    mostMissed.put("wrong", 3);
+    JSONObject randomMiss = bankQuestions.getJSONObject(0);
+    activity.start(false, true);
+    activity.index = activity.questions.indexOf(randomMiss);
+    activity.practice();
+    activity.draft = "A";
+    activity.submit(randomMiss);
+
+    activity.wrongPage();
+    assertEquals(2, activity.body.getChildCount());
+    assertNotNull(withText(activity.body.getChildAt(0), "错 3 次"));
+    View randomRow = activity.body.getChildAt(1);
+    TextView title = (TextView) withText(randomRow, "Question 0");
+    assertEquals(1, title.getMaxLines());
+    assertEquals(android.text.TextUtils.TruncateAt.END, title.getEllipsize());
+    assertNotNull(withText(randomRow, "错 1 次"));
+    assertTrue(randomRow.performClick());
+    assertEquals(Arrays.asList(mostMissed, randomMiss), activity.questions);
+    assertSame(randomMiss, activity.questions.get(activity.index));
+  }
+
+  @Test
   public void correctAnswerStartsAutomaticTurnWithin120Milliseconds() {
     activity.prefs.edit().putBoolean("auto", true).commit();
     activity.start(false);

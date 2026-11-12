@@ -963,10 +963,15 @@ public class MainActivity extends Activity {
       JSONObject q = qs.optJSONObject(i);
       if (!wrong || q.optInt("wrong") > 0) questions.add(q);
     }
+    if (wrong) questions.sort(Comparator.comparingInt((JSONObject q) -> q.optInt("wrong")).reversed());
   }
 
   void start(boolean wrong) { start(wrong, false); }
   void start(boolean wrong, boolean random) {
+    start(wrong, random, null);
+  }
+
+  void start(boolean wrong, boolean random, JSONObject target) {
     randomPractice = random;
     loadPracticeQuestions(wrong);
     if (questions.isEmpty()) {
@@ -983,7 +988,8 @@ public class MainActivity extends Activity {
       if (!prefs.contains(seedKey)) prefs.edit().putLong(seedKey, new Random().nextLong()).apply();
       Collections.shuffle(questions, new Random(prefs.getLong(seedKey, 0)));
     }
-    int position = wrong ? 0 : prefs.getInt(practicePositionKey, random ? 0 : bank.optInt("position"));
+    int position = wrong ? questions.indexOf(target)
+        : prefs.getInt(practicePositionKey, random ? 0 : bank.optInt("position"));
     index = Math.max(0, Math.min(position, questions.size() - 1));
     pendingAnswers.clear();
     practice();
@@ -1015,19 +1021,30 @@ public class MainActivity extends Activity {
   void wrongPage() {
     screen = "wrong";
     shell("错题集");
-    bar.addView(button("返回", () -> bankPage()));
-    JSONArray qs = bank.optJSONArray("questions");
-    for (int i = 0; i < qs.length(); i++) {
-      JSONObject q = qs.optJSONObject(i);
-      if (q.optInt("wrong") > 0)
-        card(
-            q.optString("title"),
-            "累计错误 " + q.optInt("wrong") + " 次",
-            () -> {
-              start(true);
-              index = questions.indexOf(q);
-              practice();
-            });
+    Button back = button("‹", this::bankPage);
+    back.setContentDescription("返回题库");
+    bar.addView(back, 0);
+    loadPracticeQuestions(true);
+    if (questions.isEmpty()) body.addView(label("暂无错题", 15));
+    for (JSONObject q : questions) {
+      LinearLayout row = new LinearLayout(this);
+      row.setGravity(Gravity.CENTER_VERTICAL);
+      row.setMinimumHeight(dp(48));
+      row.setBackground(new android.graphics.drawable.RippleDrawable(
+          android.content.res.ColorStateList.valueOf(0x22315cdb), bg(Color.WHITE), null));
+      TextView title = label(q.optString("title"), 15);
+      title.setSingleLine(true);
+      title.setEllipsize(android.text.TextUtils.TruncateAt.END);
+      row.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
+      TextView count = label("错 " + q.optInt("wrong") + " 次", 13);
+      count.setSingleLine(true);
+      count.setTextColor(0xffa61d2d);
+      row.addView(count);
+      row.setFocusable(true);
+      row.setOnClickListener(v -> start(true, false, q));
+      LinearLayout.LayoutParams layout = new LinearLayout.LayoutParams(-1, -2);
+      layout.bottomMargin = dp(6);
+      body.addView(row, layout);
     }
   }
 
@@ -1986,19 +2003,7 @@ public class MainActivity extends Activity {
     LinearLayout box = settingsContent();
     AlertDialog d =
         settingsDialog(exam ? "考试设置" : "练习设置", box, "关闭", (x, w) -> practice());
-    if (!exam) toggle(box, "答对自动跳转", "auto");
-    toggle(box, "选项乱序", exam ? "examShuffle" : "shuffle");
     if (!exam) {
-      if (randomPractice)
-        settingsAction(
-            box, d, "重新随机", false,
-            () -> new AlertDialog.Builder(this)
-                .setTitle("重新随机")
-                .setMessage("清空本题库的随机练习作答记录，重新打乱题序并从第 1 题开始？")
-                .setNegativeButton("取消", null)
-                .setPositiveButton("开始新一轮", (dialog, which) -> reshufflePractice())
-                .show());
-      settingsAction(box, d, "试题编辑", false, this::edit);
       settingsAction(
           box, d, "重练本题", false,
           () -> {
@@ -2009,8 +2014,22 @@ public class MainActivity extends Activity {
             save();
             practice();
           });
+      box.addView(new Space(this), new LinearLayout.LayoutParams(-1, dp(12)));
+      settingsAction(box, d, "试题编辑", false, this::edit);
+      toggle(box, "答对自动跳转", "auto");
     }
-    settingsAction(box, d, "返回题库", false, this::onBackPressed);
+    toggle(box, "选项乱序", exam ? "examShuffle" : "shuffle");
+    if (!exam && randomPractice) {
+      box.addView(new Space(this), new LinearLayout.LayoutParams(-1, dp(12)));
+      settingsAction(
+          box, d, "重新随机", true,
+          () -> new AlertDialog.Builder(this)
+              .setTitle("重新随机")
+              .setMessage("清空本题库的随机练习作答记录，重新打乱题序并从第 1 题开始？")
+              .setNegativeButton("取消", null)
+              .setPositiveButton("开始新一轮", (dialog, which) -> reshufflePractice())
+              .show());
+    }
     d.show();
   }
 
@@ -2078,8 +2097,8 @@ public class MainActivity extends Activity {
   }
 
   void examSetup() {
-    LinearLayout box = new LinearLayout(this);
-    box.setOrientation(LinearLayout.VERTICAL);
+    LinearLayout box = settingsContent();
+    box.setFocusableInTouchMode(true);
     Map<String, ArrayList<JSONObject>> groups = new LinkedHashMap<>();
     JSONArray qs = bank.optJSONArray("questions");
     for (int i = 0; i < qs.length(); i++) {
@@ -2087,24 +2106,41 @@ public class MainActivity extends Activity {
       groups.computeIfAbsent(q.optString("type"), k -> new ArrayList<>()).add(q);
     }
     Map<String, EditText[]> inputs = new LinkedHashMap<>();
-    for (String t : groups.keySet()) {
-      box.addView(label(t + " · 共 " + groups.get(t).size() + " 题", 16));
-      LinearLayout row = new LinearLayout(this);
-      EditText count = new EditText(this), score = new EditText(this);
-      count.setHint("题数");
-      count.setText("" + groups.get(t).size());
-      count.setInputType(2);
-      score.setHint("每题分值");
-      score.setText("1");
-      score.setInputType(8194);
-      row.addView(label("题数", 14));
-      row.addView(count, new LinearLayout.LayoutParams(0, -2, 1));
-      row.addView(label("分值", 14));
-      row.addView(score, new LinearLayout.LayoutParams(0, -2, 1));
-      box.addView(row);
-      inputs.put(t, new EditText[] {count, score});
-    }
     toggle(box, "选项乱序", "examShuffle");
+    for (Map.Entry<String, ArrayList<JSONObject>> group : groups.entrySet()) {
+      String type = group.getKey();
+      int available = group.getValue().size();
+      LinearLayout card = new LinearLayout(this);
+      card.setOrientation(LinearLayout.VERTICAL);
+      card.setPadding(dp(12), dp(10), dp(12), dp(12));
+      card.setBackground(bg(0xfff3f5f9));
+      LinearLayout.LayoutParams cardLayout = new LinearLayout.LayoutParams(-1, -2);
+      cardLayout.topMargin = dp(8);
+      box.addView(card, cardLayout);
+
+      LinearLayout heading = new LinearLayout(this);
+      heading.setGravity(Gravity.CENTER_VERTICAL);
+      TextView title = label(type, 16);
+      title.setTypeface(null, android.graphics.Typeface.BOLD);
+      title.setPadding(0, 0, dp(8), 0);
+      heading.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
+      TextView badge = label("共 " + available + " 题", 12);
+      badge.setTextColor(0xff315cba);
+      badge.setBackground(bg(0xffe4ecff));
+      badge.setPadding(dp(8), dp(4), dp(8), dp(4));
+      heading.addView(badge);
+      card.addView(heading);
+
+      LinearLayout row = new LinearLayout(this);
+      row.setBaselineAligned(false);
+      int numeric = android.text.InputType.TYPE_CLASS_NUMBER;
+      EditText count = examField(row, "抽取题数", String.valueOf(available), numeric);
+      row.addView(new Space(this), new LinearLayout.LayoutParams(dp(10), 1));
+      EditText score =
+          examField(row, "每题分值", "1", numeric | android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL);
+      card.addView(row);
+      inputs.put(type, new EditText[] {count, score});
+    }
     ScrollView sc = new ScrollView(this);
     sc.addView(box);
     AlertDialog d =
@@ -2153,6 +2189,28 @@ public class MainActivity extends Activity {
     d.show();
   }
 
+  EditText examField(LinearLayout row, String caption, String value, int inputType) {
+    LinearLayout field = new LinearLayout(this);
+    field.setOrientation(LinearLayout.VERTICAL);
+    TextView title = label(caption, 13);
+    title.setPadding(0, dp(8), 0, dp(4));
+    field.addView(title);
+    EditText input = new EditText(this);
+    input.setId(View.generateViewId());
+    title.setLabelFor(input.getId());
+    input.setInputType(inputType);
+    input.setSingleLine(true);
+    input.setText(value);
+    input.setTextSize(16);
+    input.setTextColor(0xff263650);
+    input.setPadding(dp(10), dp(8), dp(10), dp(8));
+    input.setMinimumHeight(dp(48));
+    input.setBackground(bg(Color.WHITE));
+    field.addView(input, new LinearLayout.LayoutParams(-1, -2));
+    row.addView(field, new LinearLayout.LayoutParams(0, -2, 1));
+    return input;
+  }
+
   void finishExam() {
     gradeNext(0, 0, 0);
   }
@@ -2163,11 +2221,13 @@ public class MainActivity extends Activity {
       index = 0;
       save();
       practice();
-      new AlertDialog.Builder(this)
-          .setTitle("考试成绩 " + score + " / " + total)
-          .setMessage("已交卷，可翻题查看答案和解析。")
-          .setPositiveButton("查看试卷", null)
-          .show();
+      LinearLayout box = settingsContent();
+      TextView result = label(score + " / " + total + " 分", 26);
+      result.setGravity(Gravity.CENTER);
+      result.setTextColor(0xff315cba);
+      result.setBackground(bg(0xffeaf0ff));
+      box.addView(result, new LinearLayout.LayoutParams(-1, -2));
+      settingsDialog("考试成绩", box, "查看试卷", null).show();
       return;
     }
     JSONObject q = questions.get(pos);
