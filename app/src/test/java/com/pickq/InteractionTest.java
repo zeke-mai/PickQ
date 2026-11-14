@@ -521,6 +521,32 @@ public class InteractionTest {
   }
 
   @Test
+  public void legacyJudgmentOptionsStayInOrderWhenReopeningRandomPractice() throws Exception {
+    JSONObject question = activity.bank.getJSONArray("questions").getJSONObject(0);
+    question.put("type", "单选题").put("answer", "B")
+        .put("options", new JSONObject().put("A", "对").put("B", "错"));
+    activity.prefs.edit().putBoolean("shuffle", true).putBoolean("judgmentShuffle", true).commit();
+    activity.startPractice(true);
+    activity.practiceMenu();
+    AlertDialog menu = ShadowAlertDialog.getLatestAlertDialog();
+    android.widget.Switch shuffle =
+        (android.widget.Switch) withText(menu.getWindow().getDecorView(), "判断题选项乱序");
+    assertTrue(shuffle.isChecked());
+    shuffle.performClick();
+    assertFalse(shuffle.isChecked());
+    menu.cancel();
+    shadowOf(Looper.getMainLooper()).idle();
+    activity.bankPage();
+    activity.startPractice(true);
+    assertFalse(activity.shuffleOptions(question));
+    activity.index = activity.questions.indexOf(question);
+    activity.practice();
+    assertEquals(Arrays.asList("A", "B"), activity.orders.get(activity.id(question)));
+    activity.practicePages.get(activity.index).view.findViewWithTag("B").performClick();
+    assertTrue(question.getBoolean("randomRight"));
+  }
+
+  @Test
   public void correctAnswerStartsAutomaticTurnWithin120Milliseconds() {
     activity.prefs.edit().putBoolean("auto", true).commit();
     activity.startPractice(false);

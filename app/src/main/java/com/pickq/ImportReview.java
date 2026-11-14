@@ -102,8 +102,10 @@ public final class ImportReview {
       }
     }
     if ("1".equals(r.get("__typeMissing")) || type.isEmpty()) {
+      boolean truthOptions = options.size() == 2
+          && isTruthPair(options.firstEntry().getValue(), options.lastEntry().getValue());
       type =
-          truth(answer) != null
+          truth(answer) != null || truthOptions
               ? "判断题"
               : options.isEmpty() ? "简答题" : letters(answer).length() > 1 ? "多选题" : "单选题";
       e.warnings.add("未填写题型，已推断为" + type);
@@ -171,6 +173,13 @@ public final class ImportReview {
     if (Arrays.asList("正确", "对", "是", "√", "true", "1").contains(s)) return true;
     if (Arrays.asList("错误", "错", "否", "×", "false", "0").contains(s)) return false;
     return null;
+  }
+
+  static boolean isTruthPair(String first, String second) {
+    // A pair of numeric choices can be an ordinary calculation question.
+    if (normal(first).matches("[01]") || normal(second).matches("[01]")) return false;
+    Boolean a = truth(first), b = truth(second);
+    return a != null && b != null && !a.equals(b);
   }
 
   static String letters(String value) {

@@ -2120,15 +2120,26 @@ public class MainActivity extends Activity {
   }
 
   boolean shuffleOptions(JSONObject q) {
-    if (q.optString("type").equals("判断题"))
+    if (isJudgmentChoice(q))
       return prefs.getBoolean(exam ? "examJudgmentShuffle" : "judgmentShuffle", false);
     return prefs.getBoolean(exam ? "examShuffle" : "shuffle", false);
+  }
+
+  boolean isJudgmentChoice(JSONObject q) {
+    String type = q.optString("type");
+    if (type.equals("判断题")) return true;
+    // Older imports could infer single choice when a true/false question used a letter answer.
+    JSONObject options = q.optJSONObject("options");
+    if (!type.equals("单选题") || options == null || options.length() != 2) return false;
+    Iterator<String> keys = options.keys();
+    return ImportReview.isTruthPair(options.optString(keys.next()), options.optString(keys.next()));
   }
 
   void practiceMenu() {
     LinearLayout box = settingsContent();
     AlertDialog d =
         settingsDialog(exam ? "考试设置" : "练习设置", box, "关闭", (x, w) -> practice());
+    d.setOnCancelListener(dialog -> practice());
     if (!exam) {
       settingsAction(
           box, d, "重练本题", false,

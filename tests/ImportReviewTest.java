@@ -53,6 +53,12 @@ public final class ImportReviewTest {
     Map<String, String> bool = row("反序判断", "判断题", "正确");
     bool.put("选项A", "错");
     bool.put("选项B", "对");
+    Map<String, String> implied = new HashMap<>(bool);
+    implied.put("__typeMissing", "1");
+    implied.put("正确答案", "B");
+    ImportReview.Entry inferred = ImportReview.check(implied);
+    check(inferred.row.get("题型").equals("判断题"), "Truth pair infers judgment for letter answers");
+    check(inferred.row.get("正确答案").equals("B"), "Inference preserves original answer letter");
     check(
         ImportReview.check(bool).row.get("正确答案").equals("B"),
         "Boolean correct label by option text");
