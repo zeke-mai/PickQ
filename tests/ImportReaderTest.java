@@ -13,6 +13,10 @@ public class ImportReaderTest {
   }
 
   static byte[] xlsx(String sheet) throws Exception {
+    return xlsx(sheet, false);
+  }
+
+  static byte[] xlsx(String sheet, boolean prefixed) throws Exception {
     ByteArrayOutputStream bytes = new ByteArrayOutputStream();
     try (ZipOutputStream zip = new ZipOutputStream(bytes)) {
       String[][] files = {
@@ -29,6 +33,16 @@ public class ImportReaderTest {
           "<Relationships><Relationship Id='rId1' Target='worksheets/sheet1.xml'/></Relationships>"
         }
       };
+      if (prefixed) {
+        String namespace = " xmlns:x='http://schemas.openxmlformats.org/spreadsheetml/2006/main'";
+        files[0][1] = sheet.replaceAll("<(/?)([A-Za-z]+)", "<$1x:$2")
+            .replace("<x:worksheet>", "<x:worksheet" + namespace + ">");
+        files[1][1] = files[1][1].replaceAll("<(/?)([A-Za-z]+)", "<$1x:$2")
+            .replace("<x:sst>", "<x:sst" + namespace + ">");
+        files[2][1] = files[2][1].replaceAll("<(/?)([A-Za-z]+)", "<$1x:$2")
+            .replace("<x:workbook", "<x:workbook" + namespace)
+            .replace("r:id=", "rel:id=").replace("xmlns:r=", "xmlns:rel=");
+      }
       for (String[] file : files) {
         zip.putNextEntry(new ZipEntry(file[0]));
         zip.write(file[1].getBytes(StandardCharsets.UTF_8));
@@ -71,6 +85,8 @@ public class ImportReaderTest {
     check(rows.get(1).get("题干").equals("公差 ±1 或 ±2，字面量 _x00B1_"), "XLSX inline symbols");
     check(rows.get(1).get("选项A").equals("±2 ℃"), "XLSX shared string symbols");
     check(rows.get(1).get("选项B").equals("≤3"), "XLSX cached string symbols");
+    check(rows.equals(ExcelImporter.readForPreview(new ByteArrayInputStream(xlsx(sheet, true)))),
+        "Prefixed XLSX preserves cells, shared strings, and sheet provenance");
     rows =
         ExcelImporter.readForPreview(
             new ByteArrayInputStream(

@@ -11,6 +11,10 @@ import org.w3c.dom.*;
 /** Reads values only. Template prose and formulas are never executed. */
 public final class Xlsx {
   private static final Pattern ESCAPED_CHARACTER = Pattern.compile("_x([0-9a-fA-F]{4})_");
+  private static final String RELATIONSHIP_NS =
+      "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+  private static final String STRICT_RELATIONSHIP_NS =
+      "http://purl.oclc.org/ooxml/officeDocument/relationships";
 
   public static List<Map<String, String>> read(InputStream input) throws Exception {
     return read(input, false);
@@ -41,7 +45,7 @@ public final class Xlsx {
     }
     List<String> strings = new ArrayList<>();
     if (entries.containsKey("xl/sharedStrings.xml")) {
-      NodeList ns = xml(entries.get("xl/sharedStrings.xml")).getElementsByTagName("si");
+      NodeList ns = xml(entries.get("xl/sharedStrings.xml")).getElementsByTagNameNS("*", "si");
       for (int i = 0; i < ns.getLength(); i++) strings.add(text((Element) ns.item(i), "t"));
     }
     Map<String, String> sheetNames = new HashMap<>();
@@ -49,17 +53,19 @@ public final class Xlsx {
         && entries.containsKey("xl/_rels/workbook.xml.rels")) {
       Map<String, String> targets = new HashMap<>();
       NodeList rels =
-          xml(entries.get("xl/_rels/workbook.xml.rels")).getElementsByTagName("Relationship");
+          xml(entries.get("xl/_rels/workbook.xml.rels")).getElementsByTagNameNS("*", "Relationship");
       for (int i = 0; i < rels.getLength(); i++) {
         Element rel = (Element) rels.item(i);
         String target = rel.getAttribute("Target");
         targets.put(
             rel.getAttribute("Id"), target.startsWith("/") ? target.substring(1) : "xl/" + target);
       }
-      NodeList names = xml(entries.get("xl/workbook.xml")).getElementsByTagName("sheet");
+      NodeList names = xml(entries.get("xl/workbook.xml")).getElementsByTagNameNS("*", "sheet");
       for (int i = 0; i < names.getLength(); i++) {
         Element item = (Element) names.item(i);
-        sheetNames.put(targets.get(item.getAttribute("r:id")), item.getAttribute("name"));
+        String relationship = item.getAttributeNS(RELATIONSHIP_NS, "id");
+        if (relationship.isEmpty()) relationship = item.getAttributeNS(STRICT_RELATIONSHIP_NS, "id");
+        sheetNames.put(targets.get(relationship), item.getAttribute("name"));
       }
     }
     List<Map<String, String>> result = new ArrayList<>();
@@ -69,10 +75,10 @@ public final class Xlsx {
     for (String sheet : sheets) {
       Map<Integer, String> headers = null;
       boolean sheetHasData = false;
-      NodeList rows = xml(entries.get(sheet)).getElementsByTagName("row");
+      NodeList rows = xml(entries.get(sheet)).getElementsByTagNameNS("*", "row");
       for (int i = 0; i < rows.getLength(); i++) {
         Map<Integer, String> cells = new TreeMap<>();
-        NodeList cs = ((Element) rows.item(i)).getElementsByTagName("c");
+        NodeList cs = ((Element) rows.item(i)).getElementsByTagNameNS("*", "c");
         for (int j = 0; j < cs.getLength(); j++) {
           Element c = (Element) cs.item(j);
           String ref = c.getAttribute("r");
@@ -142,7 +148,7 @@ public final class Xlsx {
   }
 
   static String text(Element e, String tag) {
-    NodeList n = e.getElementsByTagName(tag);
+    NodeList n = e.getElementsByTagNameNS("*", tag);
     StringBuilder s = new StringBuilder();
     for (int i = 0; i < n.getLength(); i++) {
       String value = n.item(i).getTextContent();
@@ -166,6 +172,7 @@ public final class Xlsx {
 
   static Document xml(byte[] b) throws Exception {
     DocumentBuilderFactory f = DocumentBuilderFactory.newInstance();
+    f.setNamespaceAware(true);
     String probe =
         new String(b, java.nio.charset.StandardCharsets.ISO_8859_1).replace("\u0000", "");
     if (probe.toUpperCase(Locale.ROOT).contains("<!DOCTYPE"))
