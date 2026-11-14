@@ -463,8 +463,95 @@ public class MainActivity extends Activity {
     AlertDialog dialog = settingsDialog("题库设置", box, "关闭", null);
     settingsAction(box, dialog, "编辑题库名字", false, this::renameBank);
     settingsAction(box, dialog, "移动至文件夹", false, this::moveBank);
+    settingsAction(box, dialog, "合并题库", false, this::chooseBankToMerge);
     settingsAction(box, dialog, "删除题库", true, this::deleteBank);
     dialog.show();
+  }
+
+  void chooseBankToMerge() {
+    JSONObject first = bank;
+    List<JSONObject> candidates = sortedBanks();
+    candidates.remove(first);
+    if (candidates.isEmpty()) {
+      toast("至少需要两个题库才能合并");
+      return;
+    }
+    String[] labels = new String[candidates.size()];
+    for (int i = 0; i < candidates.size(); i++) {
+      JSONObject candidate = candidates.get(i);
+      String folder = candidate.optString("folder");
+      labels[i] = candidate.optString("name") + " · "
+          + candidate.optJSONArray("questions").length() + " 题"
+          + (folder.isEmpty() ? "" : " · " + folder);
+    }
+    new AlertDialog.Builder(this)
+        .setTitle("选择要合并的题库")
+        .setItems(labels, (dialog, which) -> confirmBankMerge(first, candidates.get(which)))
+        .setNegativeButton("取消", null)
+        .show();
+  }
+
+  void confirmBankMerge(JSONObject first, JSONObject second) {
+    LinearLayout box = settingsContent();
+    int count = first.optJSONArray("questions").length() + second.optJSONArray("questions").length();
+    box.addView(label("创建包含 " + count + " 题的新题库，保留两个原题库。", 15));
+    EditText name = new EditText(this);
+    name.setSingleLine(true);
+    name.setHint("新题库名字");
+    String suggested = first.optString("name") + " + " + second.optString("name");
+    name.setText(suggested.length() <= 100 ? suggested : "合并题库");
+    name.setSelectAllOnFocus(true);
+    box.addView(name);
+    AlertDialog dialog = settingsDialog("合并题库", box, "合并", null);
+    dialog.setButton(AlertDialog.BUTTON_NEGATIVE, "取消", (DialogInterface.OnClickListener) null);
+    dialog.setOnShowListener(
+        v -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(
+            w -> {
+              String title = name.getText().toString().trim();
+              if (title.isEmpty() || title.length() > 100) {
+                name.setError("请填写 1–100 个字符的题库名字");
+                return;
+              }
+              if (mergeBanks(first, second, title)) dialog.dismiss();
+            }));
+    dialog.show();
+  }
+
+  boolean mergeBanks(JSONObject first, JSONObject second, String title) {
+    JSONArray combined = new JSONArray();
+    try {
+      for (JSONObject source : Arrays.asList(first, second)) {
+        JSONArray entries = source.getJSONArray("questions");
+        for (int i = 0; i < entries.length(); i++) {
+          JSONObject copy = new JSONObject(entries.getJSONObject(i).toString());
+          copy.put("id", UUID.randomUUID().toString());
+          combined.put(copy);
+        }
+      }
+    } catch (JSONException e) {
+      toast("合并失败：题库数据不完整");
+      return false;
+    }
+    JSONObject merged = new JSONObject();
+    put(merged, "id", UUID.randomUUID().toString());
+    put(merged, "name", title);
+    put(merged, "folder", first.optString("folder"));
+    put(merged, "questions", combined);
+    long now = System.currentTimeMillis();
+    put(merged, "imported", now);
+    put(merged, "visited", now);
+    JSONArray previous = banks, updated = new JSONArray();
+    for (int i = 0; i < previous.length(); i++) updated.put(previous.optJSONObject(i));
+    updated.put(merged);
+    banks = updated;
+    if (!save()) {
+      banks = previous;
+      return false;
+    }
+    bank = merged;
+    bankPage();
+    toast("已合并 " + combined.length() + " 题");
+    return true;
   }
 
   void deleteBank() {
@@ -1202,7 +1289,7 @@ public class MainActivity extends Activity {
       if (keys == null) {
         keys = new ArrayList<>();
         for (char a = 'A'; a <= 'H'; a++) if (opts.has("" + a)) keys.add("" + a);
-        if (prefs.getBoolean(exam ? "examShuffle" : "shuffle", false)) Collections.shuffle(keys);
+        if (shuffleOptions(q)) Collections.shuffle(keys);
         orders.put(id(q), keys);
       }
       for (String k : keys) {
@@ -2032,6 +2119,12 @@ public class MainActivity extends Activity {
     settingsRow(box, s, 0xff263650, 0xfff3f5f9);
   }
 
+  boolean shuffleOptions(JSONObject q) {
+    if (q.optString("type").equals("判断题"))
+      return prefs.getBoolean(exam ? "examJudgmentShuffle" : "judgmentShuffle", false);
+    return prefs.getBoolean(exam ? "examShuffle" : "shuffle", false);
+  }
+
   void practiceMenu() {
     LinearLayout box = settingsContent();
     AlertDialog d =
@@ -2052,6 +2145,7 @@ public class MainActivity extends Activity {
       toggle(box, "答对自动跳转", "auto");
     }
     toggle(box, "选项乱序", exam ? "examShuffle" : "shuffle");
+    toggle(box, "判断题选项乱序", exam ? "examJudgmentShuffle" : "judgmentShuffle");
     if (!exam && randomPractice) {
       box.addView(new Space(this), new LinearLayout.LayoutParams(-1, dp(12)));
       settingsAction(
@@ -2140,6 +2234,7 @@ public class MainActivity extends Activity {
     }
     Map<String, EditText[]> inputs = new LinkedHashMap<>();
     toggle(box, "选项乱序", "examShuffle");
+    toggle(box, "判断题选项乱序", "examJudgmentShuffle");
     for (Map.Entry<String, ArrayList<JSONObject>> group : groups.entrySet()) {
       String type = group.getKey();
       int available = group.getValue().size();

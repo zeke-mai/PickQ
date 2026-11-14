@@ -473,6 +473,54 @@ public class InteractionTest {
   }
 
   @Test
+  public void mergingFromBankSettingsCopiesBothSourcesAndKeepsTheirRecords() throws Exception {
+    JSONObject first = activity.bank;
+    JSONObject original = first.getJSONArray("questions").getJSONObject(0);
+    original.put("randomResponse", "A").put("wrong", 2);
+    JSONObject second = new JSONObject().put("id", "second").put("name", "Other bank")
+        .put("questions", new JSONArray().put(new JSONObject(original.toString())));
+    activity.banks.put(second);
+    activity.bankSettings();
+    AlertDialog settings = ShadowAlertDialog.getLatestAlertDialog();
+    assertTrue(withText(settings.getWindow().getDecorView(), "合并题库").performClick());
+    AlertDialog chooser = ShadowAlertDialog.getLatestAlertDialog();
+    assertEquals(1, chooser.getListView().getCount());
+    chooser.getListView().performItemClick(null, 0, chooser.getListView().getItemIdAtPosition(0));
+    AlertDialog confirmation = ShadowAlertDialog.getLatestAlertDialog();
+    shadowOf(Looper.getMainLooper()).idle();
+    confirmation.getButton(AlertDialog.BUTTON_POSITIVE).performClick();
+    shadowOf(Looper.getMainLooper()).idle();
+
+    assertEquals(3, activity.banks.length());
+    assertSame(first, activity.banks.getJSONObject(0));
+    assertSame(second, activity.banks.getJSONObject(1));
+    JSONObject merged = activity.bank;
+    assertEquals("Example + Other bank", merged.getString("name"));
+    assertEquals("Review", merged.getString("folder"));
+    JSONArray questions = merged.getJSONArray("questions");
+    assertEquals(5, questions.length());
+    JSONObject copy = questions.getJSONObject(0);
+    assertNotEquals(activity.id(original), activity.id(copy));
+    assertNotEquals(activity.id(copy), activity.id(questions.getJSONObject(4)));
+    assertEquals("A", copy.getString("randomResponse"));
+    assertEquals(2, copy.getInt("wrong"));
+    copy.getJSONObject("options").put("A", "Edited");
+    assertEquals("One", original.getJSONObject("options").getString("A"));
+  }
+
+  @Test
+  public void judgmentShuffleIsIndependentInPracticeAndExam() throws Exception {
+    JSONObject judgment = new JSONObject().put("type", "判断题");
+    JSONObject choice = new JSONObject().put("type", "单选题");
+    activity.prefs.edit().putBoolean("shuffle", true).putBoolean("examJudgmentShuffle", true).commit();
+    assertFalse(activity.shuffleOptions(judgment));
+    assertTrue(activity.shuffleOptions(choice));
+    activity.exam = true;
+    assertTrue(activity.shuffleOptions(judgment));
+    assertFalse(activity.shuffleOptions(choice));
+  }
+
+  @Test
   public void correctAnswerStartsAutomaticTurnWithin120Milliseconds() {
     activity.prefs.edit().putBoolean("auto", true).commit();
     activity.startPractice(false);
