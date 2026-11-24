@@ -17,7 +17,7 @@ public class MainActivity extends Activity {
   JSONObject bank;
   ArrayList<JSONObject> questions = new ArrayList<>();
   Map<String, String> examAnswers = new HashMap<>();
-  Map<String, Double> points = new HashMap<>();
+  final ExamFlow examFlow = new ExamFlow(this);
   Map<String, List<String>> orders = new HashMap<>();
   int index = 0;
   boolean exam = false, review = false;
@@ -581,7 +581,7 @@ public class MainActivity extends Activity {
               questions.clear();
               examAnswers.clear();
               orders.clear();
-              points.clear();
+              examFlow.reset();
               exam = false;
               review = false;
               home();
@@ -1014,7 +1014,7 @@ public class MainActivity extends Activity {
     pendingAnswers.clear();
     orders.clear();
     examAnswers.clear();
-    points.clear();
+    examFlow.reset();
     setIntent(new Intent(this, MainActivity.class));
     home();
     toast("已导入 " + questions.length() + " 题");
@@ -1036,7 +1036,7 @@ public class MainActivity extends Activity {
     bar.addView(button("⋮", () -> bankSettings()));
     card("顺序练习", "继续上次进度 · 即时解析", () -> startPractice(false));
     card("随机练习", "随机题序 · 继续上次进度", () -> startPractice(true));
-    card("模拟考试", "按题型抽题 · 交卷后查看答案", () -> examSetup());
+    card("模拟考试", "按题型抽题 · 交卷后查看答案", examFlow::setup);
     card("错题集", "查看累计错题与错误次数", () -> wrongPage());
   }
 
@@ -1228,7 +1228,7 @@ public class MainActivity extends Activity {
                 () ->
                     new AlertDialog.Builder(this)
                         .setMessage("确认交卷？未答题按零分计。")
-                        .setPositiveButton("交卷", (d, w) -> finishExam())
+                        .setPositiveButton("交卷", (d, w) -> examFlow.finish())
                         .setNegativeButton("继续答题", null)
                         .show()));
     }
@@ -2038,6 +2038,10 @@ public class MainActivity extends Activity {
     pendingAnswers.remove(id(q));
     saveWhenIdle();
     practice();
+    if (PracticeResults.complete(this)) {
+      PracticeResults.show(this);
+      return;
+    }
     int revision = pageRevision;
     if (ok && prefs.getBoolean("auto", false) && index + 1 < questions.size())
       ui
@@ -2153,6 +2157,7 @@ public class MainActivity extends Activity {
           });
       box.addView(new Space(this), new LinearLayout.LayoutParams(-1, dp(12)));
       settingsAction(box, d, "试题编辑", false, this::edit);
+      if (PracticeResults.complete(this)) settingsAction(box, d, "练习成绩", false, () -> PracticeResults.show(this));
       toggle(box, "答对自动跳转", "auto");
     }
     toggle(box, "选项乱序", exam ? "examShuffle" : "shuffle");
@@ -2232,162 +2237,6 @@ public class MainActivity extends Activity {
                       practice();
                     }));
     d.show();
-  }
-
-  void examSetup() {
-    LinearLayout box = settingsContent();
-    box.setFocusableInTouchMode(true);
-    Map<String, ArrayList<JSONObject>> groups = new LinkedHashMap<>();
-    JSONArray qs = bank.optJSONArray("questions");
-    for (int i = 0; i < qs.length(); i++) {
-      JSONObject q = qs.optJSONObject(i);
-      groups.computeIfAbsent(q.optString("type"), k -> new ArrayList<>()).add(q);
-    }
-    Map<String, EditText[]> inputs = new LinkedHashMap<>();
-    toggle(box, "选项乱序", "examShuffle");
-    toggle(box, "判断题选项乱序", "examJudgmentShuffle");
-    for (Map.Entry<String, ArrayList<JSONObject>> group : groups.entrySet()) {
-      String type = group.getKey();
-      int available = group.getValue().size();
-      LinearLayout card = new LinearLayout(this);
-      card.setOrientation(LinearLayout.VERTICAL);
-      card.setPadding(dp(12), dp(10), dp(12), dp(12));
-      card.setBackground(bg(0xfff3f5f9));
-      LinearLayout.LayoutParams cardLayout = new LinearLayout.LayoutParams(-1, -2);
-      cardLayout.topMargin = dp(8);
-      box.addView(card, cardLayout);
-
-      LinearLayout heading = new LinearLayout(this);
-      heading.setGravity(Gravity.CENTER_VERTICAL);
-      TextView title = label(type, 16);
-      title.setTypeface(null, android.graphics.Typeface.BOLD);
-      title.setPadding(0, 0, dp(8), 0);
-      heading.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
-      TextView badge = label("共 " + available + " 题", 12);
-      badge.setTextColor(0xff315cba);
-      badge.setBackground(bg(0xffe4ecff));
-      badge.setPadding(dp(8), dp(4), dp(8), dp(4));
-      heading.addView(badge);
-      card.addView(heading);
-
-      LinearLayout row = new LinearLayout(this);
-      row.setBaselineAligned(false);
-      int numeric = android.text.InputType.TYPE_CLASS_NUMBER;
-      EditText count = examField(row, "抽取题数", String.valueOf(available), numeric);
-      row.addView(new Space(this), new LinearLayout.LayoutParams(dp(10), 1));
-      EditText score =
-          examField(row, "每题分值", "1", numeric | android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL);
-      card.addView(row);
-      inputs.put(type, new EditText[] {count, score});
-    }
-    ScrollView sc = new ScrollView(this);
-    sc.addView(box);
-    AlertDialog d =
-        new AlertDialog.Builder(this)
-            .setTitle("模拟考试组卷")
-            .setView(sc)
-            .setPositiveButton("开始考试", null)
-            .setNegativeButton("取消", null)
-            .create();
-    d.setOnShowListener(
-        v ->
-            d.getButton(-1)
-                .setOnClickListener(
-                    w -> {
-                      ArrayList<JSONObject> chosen = new ArrayList<>();
-                      Map<String, Double> scores = new HashMap<>();
-                      try {
-                        for (String t : groups.keySet()) {
-                          int n = Integer.parseInt(inputs.get(t)[0].getText().toString());
-                          double p = Double.parseDouble(inputs.get(t)[1].getText().toString());
-                          if (n < 0 || n > groups.get(t).size() || p < 0 || !Double.isFinite(p))
-                            throw new Exception();
-                          ArrayList<JSONObject> pool = new ArrayList<>(groups.get(t));
-                          Collections.shuffle(pool);
-                          for (int i = 0; i < n; i++) {
-                            chosen.add(pool.get(i));
-                            scores.put(id(pool.get(i)), p);
-                          }
-                        }
-                        if (chosen.isEmpty()) throw new Exception();
-                      } catch (Exception e) {
-                        toast("请填写有效题数和非负分值，至少抽取一题");
-                        return;
-                      }
-                      questions = chosen;
-                      points = scores;
-                      Collections.shuffle(questions);
-                      examAnswers.clear();
-                      orders.clear();
-                      exam = true;
-                      review = false;
-                      index = 0;
-                      d.dismiss();
-                      practice();
-                    }));
-    d.show();
-  }
-
-  EditText examField(LinearLayout row, String caption, String value, int inputType) {
-    LinearLayout field = new LinearLayout(this);
-    field.setOrientation(LinearLayout.VERTICAL);
-    TextView title = label(caption, 13);
-    title.setPadding(0, dp(8), 0, dp(4));
-    field.addView(title);
-    EditText input = new EditText(this);
-    input.setId(View.generateViewId());
-    title.setLabelFor(input.getId());
-    input.setInputType(inputType);
-    input.setSingleLine(true);
-    input.setText(value);
-    input.setTextSize(16);
-    input.setTextColor(0xff263650);
-    input.setPadding(dp(10), dp(8), dp(10), dp(8));
-    input.setMinimumHeight(dp(48));
-    input.setBackground(bg(Color.WHITE));
-    field.addView(input, new LinearLayout.LayoutParams(-1, -2));
-    row.addView(field, new LinearLayout.LayoutParams(0, -2, 1));
-    return input;
-  }
-
-  void finishExam() {
-    gradeNext(0, 0, 0);
-  }
-
-  void gradeNext(int pos, double score, double total) {
-    if (pos == questions.size()) {
-      review = true;
-      index = 0;
-      save();
-      practice();
-      LinearLayout box = settingsContent();
-      TextView result = label(score + " / " + total + " 分", 26);
-      result.setGravity(Gravity.CENTER);
-      result.setTextColor(0xff315cba);
-      result.setBackground(bg(0xffeaf0ff));
-      box.addView(result, new LinearLayout.LayoutParams(-1, -2));
-      settingsDialog("考试成绩", box, "查看试卷", null).show();
-      return;
-    }
-    JSONObject q = questions.get(pos);
-    String a = examAnswers.getOrDefault(id(q), "");
-    double p = points.get(id(q));
-    if (!a.isEmpty() && manual(q)) {
-      new AlertDialog.Builder(this)
-          .setCancelable(false)
-          .setTitle("主观题人工判分")
-          .setMessage(q.optString("title") + "\n你的答案：" + displayedChoice(q, a) + "\n参考：" + q.optString("answer"))
-          .setPositiveButton("答对", (d, w) -> gradeOne(pos, true, score, total, p))
-          .setNegativeButton("答错", (d, w) -> gradeOne(pos, false, score, total, p))
-          .show();
-    } else gradeOne(pos, !a.isEmpty() && correct(q, a), score, total, p);
-  }
-
-  void gradeOne(int pos, boolean ok, double s, double total, double p) {
-    JSONObject q = questions.get(pos);
-    put(q, "examRight", ok);
-    if (!ok) put(q, "wrong", q.optInt("wrong") + 1);
-    gradeNext(pos + 1, s + (ok ? p : 0), total + p);
   }
 
   void settings() {

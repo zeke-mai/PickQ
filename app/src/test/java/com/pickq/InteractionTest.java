@@ -547,6 +547,40 @@ public class InteractionTest {
   }
 
   @Test
+  public void practiceResultAppearsWhenAllRandomQuestionsAreAnswered() {
+    activity.startPractice(true);
+    for (int i = activity.questions.size() - 1; i >= 0; i--) {
+      activity.index = i;
+      activity.draft = i == 0 ? "A" : "AB";
+      activity.submit(activity.questions.get(i));
+      if (i > 0) assertNull(ShadowAlertDialog.getLatestAlertDialog());
+    }
+    AlertDialog result = ShadowAlertDialog.getLatestAlertDialog();
+    assertNotNull(withText(result.getWindow().getDecorView(), "正确率 75.0%"));
+    assertNotNull(withText(result.getWindow().getDecorView(), "共 4 题  ·  答对 3 题  ·  答错 1 题"));
+  }
+
+  @Test
+  public void automaticExamScoresUpdateWithCountsAndAddUpExactly() {
+    activity.examFlow.setup();
+    AlertDialog setup = ShadowAlertDialog.getLatestAlertDialog();
+    View content = setup.getWindow().getDecorView();
+    ((CheckBox) withText(content, "按总分自动分配")).setChecked(true);
+    android.widget.EditText count = content.findViewById(withText(content, "抽取题数").getLabelFor());
+    android.widget.EditText perQuestion = content.findViewById(withText(content, "每题分值").getLabelFor());
+    count.setText("3");
+    assertEquals("33.33 / 33.34", perQuestion.getText().toString());
+    shadowOf(Looper.getMainLooper()).idle();
+    setup.getButton(AlertDialog.BUTTON_POSITIVE).performClick();
+    assertTrue(activity.exam);
+    assertEquals(3, activity.questions.size());
+    for (JSONObject q : activity.questions) activity.examAnswers.put(activity.id(q), "AB");
+    activity.examFlow.finish();
+    AlertDialog result = ShadowAlertDialog.getLatestAlertDialog();
+    assertNotNull(withText(result.getWindow().getDecorView(), "100 / 100 分"));
+  }
+
+  @Test
   public void correctAnswerStartsAutomaticTurnWithin120Milliseconds() {
     activity.prefs.edit().putBoolean("auto", true).commit();
     activity.startPractice(false);
