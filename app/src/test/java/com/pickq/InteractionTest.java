@@ -608,6 +608,31 @@ public class InteractionTest {
   }
 
   @Test
+  public void essayKeepsMultilineAnswerAndShowsSeparateExplanation() throws Exception {
+    JSONObject q = activity.bank.getJSONArray("questions").getJSONObject(0);
+    q.put("type", "论述题").put("answer", "参考内容").put("explanation", "第一点\n第二点");
+    activity.startPractice(false);
+    View page = activity.practicePages.get(0).view;
+    android.widget.EditText field = (android.widget.EditText)
+        ((ViewGroup) ((android.widget.ScrollView) page).getChildAt(0)).getChildAt(1);
+    assertEquals(activity.dp(168), field.getMinHeight());
+    assertTrue((field.getInputType() & android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE) != 0);
+    field.setText("第一段\n第二段");
+    assertTrue(withText(page, "提交答案").performClick());
+    AlertDialog assessment = ShadowAlertDialog.getLatestAlertDialog();
+    assertNotNull(withText(assessment.getWindow().getDecorView(), "解析"));
+    assessment.getButton(AlertDialog.BUTTON_POSITIVE).performClick();
+    shadowOf(Looper.getMainLooper()).idle();
+
+    assertEquals("第一段\n第二段", q.getString("response"));
+    page = activity.practicePages.get(0).view;
+    View heading = withText(page, "解析");
+    View explanation = withText(page, "第一点\n第二点");
+    assertSame(heading.getParent(), explanation.getParent());
+    assertNotNull(((View) heading.getParent()).getBackground());
+  }
+
+  @Test
   public void overviewAccuracyUsesOnlyAnsweredQuestions() throws Exception {
     JSONArray entries = activity.bank.getJSONArray("questions");
     entries.getJSONObject(0).put("response", "AB").put("right", true);

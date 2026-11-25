@@ -1347,10 +1347,13 @@ public class MainActivity extends Activity {
       }
     } else {
       EditText e = new EditText(this);
-      e.setHint(q.optString("type").equals("填空题") ? "多个空用 | 分隔" : "输入答案；排序题填写原选项字母顺序");
+      String type = q.optString("type");
+      boolean essay = type.equals("论述题");
+      if (essay) PracticeAnswerViews.styleEssayInput(this, e);
+      else e.setHint(type.equals("填空题") ? "多个空用 | 分隔" : "输入答案；排序题填写原选项字母顺序");
       e.setText(draft);
       e.setEnabled(!review);
-      if (q.optString("type").equals("排序题")) {
+      if (type.equals("排序题")) {
         JSONObject opts = q.optJSONObject("options");
         for (char a = 'A'; a <= 'H'; a++)
           if (opts.has("" + a)) front.addView(label(a + "  " + opts.optString("" + a), 16));
@@ -1370,7 +1373,8 @@ public class MainActivity extends Activity {
 
             public void afterTextChanged(android.text.Editable s) {}
           });
-      front.addView(e);
+      if (essay) body.addView(e, body.indexOfChild(actions), PracticeAnswerViews.cardLayout(this));
+      else front.addView(e);
     }
     if (!review && (!choice(q) || multiple(q))) {
       Button submit = button(exam ? "保存答案" : "提交答案", () -> submit(q));
@@ -1392,7 +1396,7 @@ public class MainActivity extends Activity {
     if ((!exam && !answer(q).isEmpty()) || review) {
       String reference = displayedChoice(q, q.optString("answer"));
       if (review) {
-        body.addView(label("参考答案：" + reference + "\n解析：" + q.optString("explanation"), 16));
+        body.addView(label("参考答案：" + reference, 16));
       } else {
         TextView referenceLine = label("参考答案：" + (reference.isEmpty() ? "未提供" : reference), 16);
         referenceLine.setTextColor(0xff14683c);
@@ -1402,9 +1406,8 @@ public class MainActivity extends Activity {
         selectedLine.setTextColor(0xffa61d2d);
         selectedLine.setPadding(dp(12), dp(3), dp(12), dp(8));
         body.addView(selectedLine);
-        String explanation = q.optString("explanation");
-        if (!explanation.isEmpty()) body.addView(label("解析：" + explanation, 16));
       }
+      PracticeAnswerViews.addExplanation(this, body, q.optString("explanation"));
     }
 
     draft = previousDraft;
@@ -1546,9 +1549,14 @@ public class MainActivity extends Activity {
       updateProgress();
     } else if (!answer(q).isEmpty()) return;
     else if (manual(q)) {
+      LinearLayout content = settingsContent();
+      content.addView(label(q.optString("answer"), 16));
+      PracticeAnswerViews.addExplanation(this, content, q.optString("explanation"));
+      ScrollView scroll = new ScrollView(this);
+      scroll.addView(content);
       new AlertDialog.Builder(this)
           .setTitle("参考答案")
-          .setMessage(q.optString("answer") + "\n" + q.optString("explanation"))
+          .setView(scroll)
           .setPositiveButton("我答对了", (d, w) -> record(q, true))
           .setNegativeButton("我答错了", (d, w) -> record(q, false))
           .show();
