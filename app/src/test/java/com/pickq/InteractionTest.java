@@ -579,6 +579,35 @@ public class InteractionTest {
   }
 
   @Test
+  public void shareChooserGrantsReadAccessToNamedExcelFile() throws Exception {
+    String token = java.util.UUID.randomUUID().toString();
+    java.io.File folder = new java.io.File(
+        new java.io.File(activity.getCacheDir(), SharedWorkbookProvider.CACHE_DIR), token);
+    assertTrue(folder.mkdirs());
+    String name = "电气题库 #1.xlsx";
+    BankWorkbook.write(new java.io.FileOutputStream(new java.io.File(folder, name)),
+        activity.bank.getJSONArray("questions"));
+    android.net.Uri uri = new android.net.Uri.Builder().scheme("content")
+        .authority(activity.getPackageName() + ".workbooks")
+        .appendPath(token).appendPath(name).build();
+    android.content.Intent chooser = BankExport.shareChooser(uri);
+    android.content.Intent send = chooser.getParcelableExtra(android.content.Intent.EXTRA_INTENT);
+    assertEquals(android.content.Intent.ACTION_SEND, send.getAction());
+    assertEquals(SharedWorkbookProvider.MIME, send.getType());
+    assertEquals(uri, send.getParcelableExtra(android.content.Intent.EXTRA_STREAM));
+    assertEquals(uri, send.getClipData().getItemAt(0).getUri());
+    assertEquals(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION,
+        send.getFlags() & (android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
+            | android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION));
+
+    try (android.database.Cursor row = activity.getContentResolver().query(uri, null, null, null, null)) {
+      assertTrue(row.moveToFirst());
+      assertEquals(name, row.getString(row.getColumnIndexOrThrow(android.provider.OpenableColumns.DISPLAY_NAME)));
+    }
+    assertEquals(4, ExcelImporter.readForPreview(activity.getContentResolver().openInputStream(uri)).size());
+  }
+
+  @Test
   public void overviewAccuracyUsesOnlyAnsweredQuestions() throws Exception {
     JSONArray entries = activity.bank.getJSONArray("questions");
     entries.getJSONObject(0).put("response", "AB").put("right", true);

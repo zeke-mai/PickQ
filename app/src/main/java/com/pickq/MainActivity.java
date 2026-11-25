@@ -466,7 +466,7 @@ public class MainActivity extends Activity {
     settingsAction(box, dialog, "编辑题库名字", false, this::renameBank);
     settingsAction(box, dialog, "移动至文件夹", false, this::moveBank);
     settingsAction(box, dialog, "合并题库", false, this::chooseBankToMerge);
-    settingsAction(box, dialog, "导出题库", false, () -> bankExport.chooseDestination(bank));
+    settingsAction(box, dialog, "导出题库", false, () -> bankExport.showOptions(bank));
     settingsAction(box, dialog, "删除题库", true, this::deleteBank);
     dialog.show();
   }
