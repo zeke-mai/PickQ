@@ -1,9 +1,9 @@
 package com.pickq;
 
 import android.view.Gravity;
+import android.view.View;
 import android.widget.LinearLayout;
 import android.widget.TextView;
-import java.util.Locale;
 import org.json.JSONObject;
 
 final class PracticeResults {
@@ -20,15 +20,23 @@ final class PracticeResults {
     int total = activity.questions.size();
     for (JSONObject q : activity.questions) if (q.optBoolean(activity.rightKey())) right++;
     LinearLayout box = activity.settingsContent();
-    TextView accuracy = activity.label(String.format(Locale.CHINA, "正确率 %.1f%%", right * 100.0 / total), 26);
-    accuracy.setGravity(Gravity.CENTER);
-    accuracy.setTextColor(0xff315cba);
-    accuracy.setBackground(activity.bg(0xffeaf0ff));
-    box.addView(accuracy);
+    View accuracy = new AccuracyRing(activity, right, total, true);
+    LinearLayout.LayoutParams ringLayout = new LinearLayout.LayoutParams(activity.dp(132), activity.dp(132));
+    ringLayout.gravity = Gravity.CENTER_HORIZONTAL;
+    box.addView(accuracy, ringLayout);
     TextView counts = activity.label("共 " + total + " 题  ·  答对 " + right + " 题  ·  答错 " + (total - right) + " 题", 15);
     counts.setGravity(Gravity.CENTER);
     box.addView(counts);
     activity.settingsDialog("练习成绩", box, "查看题目", null).show();
   }
 
+  static View overviewAccuracy(MainActivity activity) {
+    int done = 0, right = 0;
+    for (JSONObject q : activity.questions) {
+      if (activity.answer(q).isEmpty()) continue;
+      done++;
+      if (q.optBoolean(activity.exam ? "examRight" : activity.rightKey())) right++;
+    }
+    return new AccuracyRing(activity, right, done, false);
+  }
 }

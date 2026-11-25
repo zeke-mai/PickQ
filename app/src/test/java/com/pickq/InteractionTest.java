@@ -556,8 +556,37 @@ public class InteractionTest {
       if (i > 0) assertNull(ShadowAlertDialog.getLatestAlertDialog());
     }
     AlertDialog result = ShadowAlertDialog.getLatestAlertDialog();
-    assertNotNull(withText(result.getWindow().getDecorView(), "正确率 75.0%"));
+    assertNotNull(withText(result.getWindow().getDecorView(), "75.0%"));
     assertNotNull(withText(result.getWindow().getDecorView(), "共 4 题  ·  答对 3 题  ·  答错 1 题"));
+  }
+
+  @Test
+  public void exportedBankCanBeImportedWithItsOptionsAndExplanation() throws Exception {
+    JSONObject question = activity.bank.getJSONArray("questions").getJSONObject(0);
+    question.put("title", "=第一行 < &\n第二行 _x0041_ 😀");
+    question.put("explanation", "解析内容 ±2");
+    question.getJSONObject("options").put("H", "末项");
+    java.io.ByteArrayOutputStream output = new java.io.ByteArrayOutputStream();
+    BankWorkbook.write(output, activity.bank.getJSONArray("questions"));
+    java.util.List<java.util.Map<String, String>> rows =
+        ExcelImporter.readForPreview(new java.io.ByteArrayInputStream(output.toByteArray()));
+    assertEquals(4, rows.size());
+    assertEquals(question.optString("id"), rows.get(0).get("题目ID"));
+    assertEquals(question.optString("title"), rows.get(0).get("题干"));
+    assertEquals(question.optString("explanation"), rows.get(0).get("解析"));
+    assertEquals("末项", rows.get(0).get("选项H"));
+    assertEquals("AB", rows.get(0).get("正确答案"));
+  }
+
+  @Test
+  public void overviewAccuracyUsesOnlyAnsweredQuestions() throws Exception {
+    JSONArray entries = activity.bank.getJSONArray("questions");
+    entries.getJSONObject(0).put("response", "AB").put("right", true);
+    entries.getJSONObject(1).put("response", "A").put("right", false);
+    activity.startPractice(false);
+    layout();
+    activity.showQuestionOverview();
+    assertNotNull(withText(activity.questionOverview.getWindow().getDecorView(), "50.0%"));
   }
 
   @Test

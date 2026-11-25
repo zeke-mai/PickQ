@@ -18,6 +18,7 @@ public class MainActivity extends Activity {
   ArrayList<JSONObject> questions = new ArrayList<>();
   Map<String, String> examAnswers = new HashMap<>();
   final ExamFlow examFlow = new ExamFlow(this);
+  final BankExport bankExport = new BankExport(this);
   Map<String, List<String>> orders = new HashMap<>();
   int index = 0;
   boolean exam = false, review = false;
@@ -100,6 +101,7 @@ public class MainActivity extends Activity {
         migrated = true;
       }
     if (migrated) save();
+    bankExport.restore(b);
     home();
     if (b != null && b.containsKey("pendingImportUri"))
       requestImport(Uri.parse(b.getString("pendingImportUri")));
@@ -464,6 +466,7 @@ public class MainActivity extends Activity {
     settingsAction(box, dialog, "编辑题库名字", false, this::renameBank);
     settingsAction(box, dialog, "移动至文件夹", false, this::moveBank);
     settingsAction(box, dialog, "合并题库", false, this::chooseBankToMerge);
+    settingsAction(box, dialog, "导出题库", false, () -> bankExport.chooseDestination(bank));
     settingsAction(box, dialog, "删除题库", true, this::deleteBank);
     dialog.show();
   }
@@ -667,6 +670,10 @@ public class MainActivity extends Activity {
 
   protected void onActivityResult(int r, int c, Intent data) {
     super.onActivityResult(r, c, data);
+    if (r == BankExport.REQUEST) {
+      bankExport.complete(c == RESULT_OK && data != null ? data.getData() : null);
+      return;
+    }
     if (r == 2) {
       if (getPackageManager().canRequestPackageInstalls()) installUpdate();
       return;
@@ -687,6 +694,7 @@ public class MainActivity extends Activity {
 
   @Override
   protected void onSaveInstanceState(Bundle state) {
+    bankExport.saveState(state);
     if (pendingImportUri != null) state.putString("pendingImportUri", pendingImportUri.toString());
     super.onSaveInstanceState(state);
   }
@@ -1750,9 +1758,14 @@ public class MainActivity extends Activity {
     LinearLayout heading = new LinearLayout(this);
     heading.setGravity(Gravity.CENTER_VERTICAL);
     heading.addView(label("题号总览", 18), new LinearLayout.LayoutParams(0, -2, 1));
+    boolean ungradedExam = exam && !review;
+    if (!ungradedExam) {
+      LinearLayout.LayoutParams ring = new LinearLayout.LayoutParams(dp(64), dp(64));
+      ring.setMarginEnd(dp(8));
+      heading.addView(PracticeResults.overviewAccuracy(this), ring);
+    }
     heading.addView(button("关闭", () -> content.settle(false)));
     content.addView(heading);
-    boolean ungradedExam = exam && !review;
     content.addView(label(ungradedExam ? "蓝色已作答 · 灰色未答" : "绿色答对 · 红色答错 · 灰色未答", 13));
 
     GridView numbers = new GridView(this);
