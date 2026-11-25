@@ -19,6 +19,7 @@ public class MainActivity extends Activity {
   Map<String, String> examAnswers = new HashMap<>();
   final ExamFlow examFlow = new ExamFlow(this);
   final BankExport bankExport = new BankExport(this);
+  final ExplanationImport explanationImport = new ExplanationImport(this);
   Map<String, List<String>> orders = new HashMap<>();
   int index = 0;
   boolean exam = false, review = false;
@@ -102,6 +103,7 @@ public class MainActivity extends Activity {
       }
     if (migrated) save();
     bankExport.restore(b);
+    explanationImport.restore(b);
     home();
     if (b != null && b.containsKey("pendingImportUri"))
       requestImport(Uri.parse(b.getString("pendingImportUri")));
@@ -467,6 +469,7 @@ public class MainActivity extends Activity {
     settingsAction(box, dialog, "移动至文件夹", false, this::moveBank);
     settingsAction(box, dialog, "合并题库", false, this::chooseBankToMerge);
     settingsAction(box, dialog, "导出题库", false, () -> bankExport.showOptions(bank));
+    settingsAction(box, dialog, "导入解析", false, () -> explanationImport.chooseFile(bank));
     settingsAction(box, dialog, "删除题库", true, this::deleteBank);
     dialog.show();
   }
@@ -670,6 +673,10 @@ public class MainActivity extends Activity {
 
   protected void onActivityResult(int r, int c, Intent data) {
     super.onActivityResult(r, c, data);
+    if (r == ExplanationImport.REQUEST) {
+      explanationImport.complete(c == RESULT_OK && data != null ? data.getData() : null);
+      return;
+    }
     if (r == BankExport.REQUEST) {
       bankExport.complete(c == RESULT_OK && data != null ? data.getData() : null);
       return;
@@ -695,6 +702,7 @@ public class MainActivity extends Activity {
   @Override
   protected void onSaveInstanceState(Bundle state) {
     bankExport.saveState(state);
+    explanationImport.saveState(state);
     if (pendingImportUri != null) state.putString("pendingImportUri", pendingImportUri.toString());
     super.onSaveInstanceState(state);
   }

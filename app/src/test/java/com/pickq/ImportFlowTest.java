@@ -60,6 +60,58 @@ public class ImportFlowTest {
   }
 
   @Test
+  public void explanationImportMatchesOriginalWorkbookAndPreservesPracticeData() throws Exception {
+    JSONObject a = activity.importedQuestion(row("甲题", "A"));
+    JSONObject b = activity.importedQuestion(row("乙题", "B"));
+    a.put("response", "B").put("right", false).put("wrong", 3);
+    b.put("explanation", "原解析");
+    JSONObject bank = new JSONObject().put("id", "target").put("name", "原题库")
+        .put("questions", new JSONArray().put(a).put(b));
+    activity.banks.put(bank);
+    activity.bank = bank;
+    JSONObject editedA = new JSONObject(a.toString()).put("explanation", "新增解析");
+    JSONObject editedB = new JSONObject(b.toString()).put("explanation", "替换解析");
+    editedA.remove("id");
+    editedB.remove("id");
+    ByteArrayOutputStream workbook = new ByteArrayOutputStream();
+    BankWorkbook.write(workbook, new JSONArray().put(editedB).put(editedA));
+    Uri uri = Uri.parse("content://documents/explanations.xlsx");
+    shadowOf(activity.getContentResolver())
+        .registerInputStream(uri, new ByteArrayInputStream(workbook.toByteArray()));
+    activity.explanationImport.chooseFile(bank);
+    activity.onActivityResult(ExplanationImport.REQUEST, MainActivity.RESULT_OK, new Intent().setData(uri));
+    long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
+    AlertDialog dialog;
+    do {
+      shadowOf(Looper.getMainLooper()).idle();
+      dialog = ShadowAlertDialog.getLatestAlertDialog();
+      if (dialog != null) break;
+      Thread.sleep(10);
+    } while (System.nanoTime() < deadline);
+    assertNotNull(dialog);
+    assertEquals("导入解析预览", shadowOf(dialog).getTitle());
+    assertEquals("", a.optString("explanation"));
+    dialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick();
+    assertEquals("新增解析", a.optString("explanation"));
+    assertEquals("原解析", b.optString("explanation"));
+    assertEquals("B", a.optString("response"));
+    assertEquals(3, a.optInt("wrong"));
+    assertEquals(1, activity.banks.length());
+  }
+
+  @Test
+  public void conflictingExplanationRowsAreNeverApplied() throws Exception {
+    Map<String, String> first = row("题目", "A"), second = row("题目", "A");
+    first.put("解析", "第一份");
+    second.put("解析", "第二份");
+    JSONObject question = activity.importedQuestion(first);
+    ExplanationMatches matches = ExplanationMatches.find(
+        new JSONArray().put(question), Arrays.asList(first, second));
+    assertEquals(1, matches.issues.size());
+    assertTrue(matches.changes.isEmpty());
+  }
+
+  @Test
   public void previewWritesNothingUntilExplicitConfirmation() throws Exception {
     activity.showImportPreview(report(), "新题库");
     assertEquals("import", activity.screen);
