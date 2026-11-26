@@ -620,7 +620,12 @@ public class InteractionTest {
     field.setText("第一段\n第二段");
     assertTrue(withText(page, "提交答案").performClick());
     AlertDialog assessment = ShadowAlertDialog.getLatestAlertDialog();
-    assertNotNull(withText(assessment.getWindow().getDecorView(), "解析"));
+    View comparison = assessment.getWindow().getDecorView();
+    assertNotNull(withText(comparison, "解析"));
+    assertNotNull(withText(comparison, "你的答案"));
+    assertNotNull(withText(comparison, "第一段\n第二段"));
+    assertNotNull(withText(comparison, "参考内容"));
+    activity.prefs.edit().putBoolean("auto", true).apply();
     assessment.getButton(AlertDialog.BUTTON_POSITIVE).performClick();
     shadowOf(Looper.getMainLooper()).idle();
 
@@ -630,6 +635,45 @@ public class InteractionTest {
     View explanation = withText(page, "第一点\n第二点");
     assertSame(heading.getParent(), explanation.getParent());
     assertNotNull(((View) heading.getParent()).getBackground());
+    settle();
+    assertEquals(0, activity.index);
+  }
+
+  @Test
+  public void shortAnswersUseMultilineInputAndFillInChecksCase() throws Exception {
+    JSONObject shortAnswer = activity.bank.getJSONArray("questions").getJSONObject(0);
+    shortAnswer.put("type", "简答题").put("answer", "文本");
+    activity.startPractice(false);
+    android.widget.EditText field = (android.widget.EditText)
+        ((ViewGroup) ((android.widget.ScrollView) activity.practicePages.get(0).view)
+            .getChildAt(0)).getChildAt(1);
+    assertTrue((field.getInputType() & android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE) != 0);
+    JSONObject fill = new JSONObject().put("type", "填空题").put("answer", "mA | kV");
+    assertTrue(activity.correct(fill, "mA|kV"));
+    assertFalse(activity.correct(fill, "MA|kv"));
+  }
+
+  @Test
+  public void clearAndRepeatRestartsOnlySequentialPractice() throws Exception {
+    JSONObject q = activity.bank.getJSONArray("questions").getJSONObject(0);
+    q.put("response", "AB").put("right", true).put("randomResponse", "A")
+        .put("randomRight", false).put("wrong", 2);
+    activity.prefs.edit().putInt("position:fixture", 2).putInt("randomPosition:fixture", 1).apply();
+    activity.startPractice(false);
+    assertEquals(2, activity.index);
+    activity.practiceMenu();
+    AlertDialog menu = ShadowAlertDialog.getLatestAlertDialog();
+    assertTrue(withText(menu.getWindow().getDecorView(), "清空重练").performClick());
+    AlertDialog confirmation = ShadowAlertDialog.getLatestAlertDialog();
+    confirmation.getButton(AlertDialog.BUTTON_POSITIVE).performClick();
+    shadowOf(Looper.getMainLooper()).idle();
+    assertEquals(0, activity.index);
+    assertFalse(q.has("response"));
+    assertFalse(q.has("right"));
+    assertEquals("A", q.getString("randomResponse"));
+    assertEquals(2, q.getInt("wrong"));
+    activity.startPractice(true);
+    assertEquals(1, activity.index);
   }
 
   @Test

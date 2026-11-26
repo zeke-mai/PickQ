@@ -1111,6 +1111,27 @@ public class MainActivity extends Activity {
     practice();
   }
 
+  void restartSequentialPractice() {
+    List<Object> responses = new ArrayList<>();
+    List<Object> outcomes = new ArrayList<>();
+    Object oldPosition = bank.opt("position");
+    for (JSONObject q : questions) {
+      responses.add(q.remove("response"));
+      outcomes.add(q.remove("right"));
+    }
+    put(bank, "position", 0);
+    if (!save()) {
+      put(bank, "position", oldPosition);
+      for (int i = 0; i < questions.size(); i++) {
+        put(questions.get(i), "response", responses.get(i));
+        put(questions.get(i), "right", outcomes.get(i));
+      }
+      return;
+    }
+    prefs.edit().putInt(practicePositionKey, 0).apply();
+    startPractice(false);
+  }
+
   void wrongPage() {
     screen = "wrong";
     shell("错题集");
@@ -1184,6 +1205,8 @@ public class MainActivity extends Activity {
   }
 
   boolean correct(JSONObject q, String a) {
+    if (q.optString("type").equals("填空题"))
+      return a.replaceAll("\\s+", "").equals(q.optString("answer").replaceAll("\\s+", ""));
     if (q.optString("type").contains("多选") || q.optString("type").contains("不定项")) {
       char[] x = norm(a).toCharArray(), y = norm(q.optString("answer")).toCharArray();
       Arrays.sort(x);
@@ -1299,6 +1322,9 @@ public class MainActivity extends Activity {
     actions.setGravity(Gravity.CENTER_VERTICAL);
     body.addView(actions, new LinearLayout.LayoutParams(-1, -2));
     CheckBox selectAll = new CheckBox(this);
+    String type = q.optString("type");
+    boolean longAnswer = PracticeAnswerViews.longAnswer(type);
+    boolean showAnswers = (!exam && !answer(q).isEmpty()) || review;
     if (choice(q)) {
       JSONObject opts = q.optJSONObject("options");
       List<String> keys = orders.get(id(q));
@@ -1353,11 +1379,9 @@ public class MainActivity extends Activity {
           updateProgress();
         });
       }
-    } else {
+    } else if (!longAnswer || !showAnswers) {
       EditText e = new EditText(this);
-      String type = q.optString("type");
-      boolean essay = type.equals("论述题");
-      if (essay) PracticeAnswerViews.styleEssayInput(this, e);
+      if (longAnswer) PracticeAnswerViews.styleLongAnswerInput(this, e);
       else e.setHint(type.equals("填空题") ? "多个空用 | 分隔" : "输入答案；排序题填写原选项字母顺序");
       e.setText(draft);
       e.setEnabled(!review);
@@ -1381,10 +1405,10 @@ public class MainActivity extends Activity {
 
             public void afterTextChanged(android.text.Editable s) {}
           });
-      if (essay) body.addView(e, body.indexOfChild(actions), PracticeAnswerViews.cardLayout(this));
+      if (longAnswer) body.addView(e, body.indexOfChild(actions), PracticeAnswerViews.cardLayout(this));
       else front.addView(e);
     }
-    if (!review && (!choice(q) || multiple(q))) {
+    if (!review && !(longAnswer && showAnswers) && (!choice(q) || multiple(q))) {
       Button submit = button(exam ? "保存答案" : "提交答案", () -> submit(q));
       submit.setSingleLine(false);
       GradientDrawable surface = bg(0xffeaf0ff);
@@ -1401,9 +1425,11 @@ public class MainActivity extends Activity {
       actions.addView(submit, new LinearLayout.LayoutParams(-2, -2));
       if (multiple(q)) actions.addView(new Space(this), new LinearLayout.LayoutParams(0, 1, 1));
     }
-    if ((!exam && !answer(q).isEmpty()) || review) {
+    if (showAnswers) {
       String reference = displayedChoice(q, q.optString("answer"));
-      if (review) {
+      if (longAnswer) {
+        PracticeAnswerViews.addComparison(this, body, answer(q), reference);
+      } else if (review) {
         body.addView(label("参考答案：" + reference, 16));
       } else {
         TextView referenceLine = label("参考答案：" + (reference.isEmpty() ? "未提供" : reference), 16);
@@ -1558,12 +1584,14 @@ public class MainActivity extends Activity {
     } else if (!answer(q).isEmpty()) return;
     else if (manual(q)) {
       LinearLayout content = settingsContent();
-      content.addView(label(q.optString("answer"), 16));
+      boolean longAnswer = PracticeAnswerViews.longAnswer(q.optString("type"));
+      if (longAnswer) PracticeAnswerViews.addComparison(this, content, draft, q.optString("answer"));
+      else content.addView(label(q.optString("answer"), 16));
       PracticeAnswerViews.addExplanation(this, content, q.optString("explanation"));
       ScrollView scroll = new ScrollView(this);
       scroll.addView(content);
       new AlertDialog.Builder(this)
-          .setTitle("参考答案")
+          .setTitle(longAnswer ? "对照答案并自评" : "参考答案")
           .setView(scroll)
           .setPositiveButton("我答对了", (d, w) -> record(q, true))
           .setNegativeButton("我答错了", (d, w) -> record(q, false))
@@ -2072,7 +2100,8 @@ public class MainActivity extends Activity {
       return;
     }
     int revision = pageRevision;
-    if (ok && prefs.getBoolean("auto", false) && index + 1 < questions.size())
+    if (ok && !PracticeAnswerViews.longAnswer(q.optString("type"))
+        && prefs.getBoolean("auto", false) && index + 1 < questions.size())
       ui
           .postDelayed(
               () -> {
@@ -2200,6 +2229,16 @@ public class MainActivity extends Activity {
               .setMessage("清空本题库的随机练习作答记录，重新打乱题序并从第 1 题开始？")
               .setNegativeButton("取消", null)
               .setPositiveButton("开始新一轮", (dialog, which) -> reshufflePractice())
+              .show());
+    } else if (!exam) {
+      box.addView(new Space(this), new LinearLayout.LayoutParams(-1, dp(12)));
+      settingsAction(
+          box, d, "清空重练", true,
+          () -> new AlertDialog.Builder(this)
+              .setTitle("清空顺序练习")
+              .setMessage("清空本题库的顺序练习作答记录，并从第 1 题开始？")
+              .setNegativeButton("取消", null)
+              .setPositiveButton("清空并重练", (dialog, which) -> restartSequentialPractice())
               .show());
     }
     d.show();

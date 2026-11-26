@@ -10,7 +10,11 @@ import android.widget.TextView;
 final class PracticeAnswerViews {
   private PracticeAnswerViews() {}
 
-  static void styleEssayInput(MainActivity activity, EditText field) {
+  static boolean longAnswer(String type) {
+    return type.equals("简答题") || type.equals("论述题");
+  }
+
+  static void styleLongAnswerInput(MainActivity activity, EditText field) {
     field.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE
         | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
     field.setGravity(Gravity.TOP | Gravity.START);
@@ -24,15 +28,26 @@ final class PracticeAnswerViews {
 
   static void addExplanation(MainActivity activity, LinearLayout body, String explanation) {
     if (explanation.trim().isEmpty()) return;
+    addCard(activity, body, "解析", explanation, 0xff263650);
+  }
+
+  static void addComparison(MainActivity activity, LinearLayout body, String submitted, String reference) {
+    addCard(activity, body, "你的答案", submitted.trim().isEmpty() ? "未作答" : submitted, 0xff315cba);
+    addCard(activity, body, "参考答案", reference.trim().isEmpty() ? "未提供" : reference, 0xff14683c);
+  }
+
+  private static void addCard(
+      MainActivity activity, LinearLayout body, String title, String text, int accent) {
     LinearLayout card = new LinearLayout(activity);
     card.setOrientation(LinearLayout.VERTICAL);
     card.setBackground(activity.bg(Color.WHITE));
     card.setPadding(activity.dp(16), activity.dp(14), activity.dp(16), activity.dp(16));
-    TextView heading = activity.label("解析", 15);
+    TextView heading = activity.label(title, 15);
+    heading.setTextColor(accent);
     heading.setPadding(0, 0, 0, activity.dp(8));
     heading.setTypeface(null, android.graphics.Typeface.BOLD);
     card.addView(heading);
-    TextView content = activity.label(explanation, 16);
+    TextView content = activity.label(text, 16);
     content.setPadding(0, 0, 0, 0);
     card.addView(content);
     body.addView(card, cardLayout(activity));
