@@ -27,7 +27,12 @@ final class ExamFlow {
     JSONArray qs = activity.bank.optJSONArray("questions");
     for (int i = 0; i < qs.length(); i++) {
       JSONObject q = qs.optJSONObject(i);
+      if (CutQuestions.contains(q)) continue;
       groups.computeIfAbsent(q.optString("type"), k -> new ArrayList<>()).add(q);
+    }
+    if (groups.isEmpty()) {
+      activity.toast("暂无可抽取的题目，可去斩题库恢复");
+      return;
     }
     Map<String, EditText[]> inputs = new LinkedHashMap<>();
     int numeric = android.text.InputType.TYPE_CLASS_NUMBER;

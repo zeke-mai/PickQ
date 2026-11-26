@@ -19,6 +19,7 @@ public class MainActivity extends Activity {
   Map<String, String> examAnswers = new HashMap<>();
   final ExamFlow examFlow = new ExamFlow(this);
   final BankExport bankExport = new BankExport(this);
+  final CutQuestions cutQuestions = new CutQuestions(this);
   final ExplanationImport explanationImport = new ExplanationImport(this);
   Map<String, List<String>> orders = new HashMap<>();
   int index = 0;
@@ -125,7 +126,9 @@ public class MainActivity extends Activity {
           out.write(data.getBytes(java.nio.charset.StandardCharsets.UTF_8));
           out.getFD().sync();
         }
-        if (!temp.renameTo(new File(getFilesDir(), "banks.json"))) throw new IOException("替换存储失败");
+        java.nio.file.Files.move(temp.toPath(), new File(getFilesDir(), "banks.json").toPath(),
+            java.nio.file.StandardCopyOption.ATOMIC_MOVE,
+            java.nio.file.StandardCopyOption.REPLACE_EXISTING);
         return true;
       } catch (Exception e) {
         ui.post(() -> toast("保存失败：" + e.getMessage()));
@@ -1054,6 +1057,7 @@ public class MainActivity extends Activity {
     card("随机练习", "随机题序 · 继续上次进度", () -> startPractice(true));
     card("模拟考试", "按题型抽题 · 交卷后查看答案", examFlow::setup);
     card("错题集", "查看累计错题与错误次数", () -> wrongPage());
+    card("斩题库", cutQuestions.count(bank.optJSONArray("questions")) + " 题 · 可随时恢复", cutQuestions::show);
   }
 
   boolean randomPractice;
@@ -1068,10 +1072,6 @@ public class MainActivity extends Activity {
   void startPractice(boolean random) {
     randomPractice = random;
     loadPracticeQuestions();
-    if (questions.isEmpty()) {
-      toast("题库暂无题目");
-      return;
-    }
     exam = false;
     review = false;
     orders.clear();
@@ -1082,7 +1082,19 @@ public class MainActivity extends Activity {
       if (!prefs.contains(seedKey)) prefs.edit().putLong(seedKey, new Random().nextLong()).apply();
       Collections.shuffle(questions, new Random(prefs.getLong(seedKey, 0)));
     }
+    questions.removeIf(CutQuestions::contains);
+    if (questions.isEmpty()) {
+      toast("暂无可练习的题目，可去斩题库恢复");
+      return;
+    }
     int position = prefs.getInt(practicePositionKey, random ? 0 : bank.optInt("position"));
+    String currentId = prefs.getString(practicePositionKey + ":question", "");
+    for (int i = 0; i < questions.size(); i++) {
+      if (id(questions.get(i)).equals(currentId)) {
+        position = i;
+        break;
+      }
+    }
     index = Math.max(0, Math.min(position, questions.size() - 1));
     pendingAnswers.clear();
     practice();
@@ -1096,6 +1108,7 @@ public class MainActivity extends Activity {
       seed = random.nextLong();
       loadPracticeQuestions();
       Collections.shuffle(questions, new Random(seed));
+      questions.removeIf(CutQuestions::contains);
     } while (questions.size() > 1 && questions.equals(previous));
     for (JSONObject q : questions) {
       q.remove("randomResponse");
@@ -1107,6 +1120,7 @@ public class MainActivity extends Activity {
     prefs.edit()
         .putLong("randomSeed:" + bank.optString("id"), seed)
         .putInt(practicePositionKey, index)
+        .putString(practicePositionKey + ":question", id(questions.get(index)))
         .apply();
     practice();
   }
@@ -1128,7 +1142,7 @@ public class MainActivity extends Activity {
       }
       return;
     }
-    prefs.edit().putInt(practicePositionKey, 0).apply();
+    prefs.edit().putInt(practicePositionKey, 0).remove(practicePositionKey + ":question").apply();
     startPractice(false);
   }
 
@@ -1169,6 +1183,10 @@ public class MainActivity extends Activity {
   }
 
   void showMistake(JSONObject q) {
+    showMistake(q, "错题详情");
+  }
+
+  void showMistake(JSONObject q, String title) {
     LinearLayout box = settingsContent();
     box.addView(label(q.optString("title"), 17));
     JSONObject options = q.optJSONObject("options");
@@ -1188,7 +1206,7 @@ public class MainActivity extends Activity {
     TextView answer = label("参考答案：" + (reference.isEmpty() ? "未提供" : reference), 16);
     answer.setTextColor(0xff14683c);
     box.addView(answer);
-    settingsDialog("错题详情", box, "关闭", null).show();
+    settingsDialog(title, box, "关闭", null).show();
   }
 
   boolean choice(JSONObject q) {
@@ -1229,6 +1247,7 @@ public class MainActivity extends Activity {
       Button back = button("‹", this::onBackPressed);
       back.setContentDescription("返回题库");
       bar.addView(back, 0);
+      if (!exam) bar.addView(button("斩题", this::cutCurrentQuestion));
       bar.addView(button("⋮", () -> practiceMenu()));
       root.removeViewAt(1);
       practiceExam = exam;
@@ -1528,7 +1547,25 @@ public class MainActivity extends Activity {
   void savePracticePosition() {
     if (exam || practicePositionKey == null) return;
     if (!randomPractice) put(bank, "position", index);
-    prefs.edit().putInt(practicePositionKey, index).apply();
+    prefs.edit().putInt(practicePositionKey, index)
+        .putString(practicePositionKey + ":question", id(questions.get(index))).apply();
+  }
+
+  void cutCurrentQuestion() {
+    if (exam || turning || dragging || !screen.equals("practice") || questions.isEmpty()) return;
+    JSONObject question = questions.get(index);
+    if (!cutQuestions.setCut(question, true)) return;
+    pendingAnswers.remove(id(question));
+    questions.remove(index);
+    if (questions.isEmpty()) {
+      prefs.edit().putInt(practicePositionKey, 0).remove(practicePositionKey + ":question").apply();
+      bankPage();
+    } else {
+      index = Math.min(index, questions.size() - 1);
+      savePracticePosition();
+      practice();
+    }
+    toast("已加入斩题库");
   }
 
   void settlePages(int delta) {

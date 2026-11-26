@@ -689,6 +689,37 @@ public class InteractionTest {
   }
 
   @Test
+  public void cuttingAndRestoringPreservesAnswersAndFiltersPracticeAndExams() throws Exception {
+    JSONObject cut = activity.bank.getJSONArray("questions").getJSONObject(0);
+    cut.put("response", "AB").put("right", true).put("wrong", 2);
+    activity.startPractice(false);
+    View action = withText(activity.bar, "斩题");
+    assertEquals(activity.bar.indexOfChild(withText(activity.bar, "⋮")) - 1,
+        activity.bar.indexOfChild(action));
+    assertTrue(action.performClick());
+    assertEquals(3, activity.questions.size());
+    assertEquals("q1", activity.id(activity.questions.get(activity.index)));
+    assertTrue(CutQuestions.contains(cut));
+    activity.startPractice(true);
+    assertFalse(activity.questions.contains(cut));
+
+    activity.bankPage();
+    activity.examFlow.setup();
+    AlertDialog setup = ShadowAlertDialog.getLatestAlertDialog();
+    assertNotNull(withText(setup.getWindow().getDecorView(), "共 3 题"));
+    setup.dismiss();
+    activity.cutQuestions.show();
+    assertNotNull(withText(activity.body, cut.getString("title")));
+    assertTrue(withText(activity.body, "恢复").performClick());
+    assertFalse(CutQuestions.contains(cut));
+    assertEquals("AB", cut.getString("response"));
+    assertEquals(2, cut.getInt("wrong"));
+    activity.startPractice(false);
+    assertEquals(4, activity.questions.size());
+    assertEquals("q1", activity.id(activity.questions.get(activity.index)));
+  }
+
+  @Test
   public void overviewAccuracyUsesOnlyAnsweredQuestions() throws Exception {
     JSONArray entries = activity.bank.getJSONArray("questions");
     entries.getJSONObject(0).put("response", "AB").put("right", true);
