@@ -19,7 +19,7 @@ final class AccuracyRing extends FrameLayout {
     fraction = done == 0 ? 0f : (float) right / done;
     stroke = activity.dp(large ? 9 : 4);
     String percent = done == 0 ? "—" : String.format(Locale.CHINA, "%.1f%%", 100.0 * right / done);
-    setContentDescription(done == 0 ? "正确率，尚未作答" : "正确率 " + percent);
+    setContentDescription(done == 0 ? "正确率，暂无判分结果" : "正确率 " + percent);
     setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_YES);
 
     TextView value = new TextView(activity);

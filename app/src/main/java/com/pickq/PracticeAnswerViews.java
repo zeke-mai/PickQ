@@ -32,12 +32,13 @@ final class PracticeAnswerViews {
   }
 
   static void addComparison(MainActivity activity, LinearLayout body, String submitted, String reference) {
-    addCard(activity, body, "你的答案", submitted.trim().isEmpty() ? "未作答" : submitted, 0xff315cba);
-    addCard(activity, body, "参考答案", reference.trim().isEmpty() ? "未提供" : reference, 0xff14683c);
+    CharSequence[] compared = AnswerDifferences.highlight(submitted, reference);
+    addCard(activity, body, "你的答案", submitted.trim().isEmpty() ? "未作答" : compared[0], 0xff315cba);
+    addCard(activity, body, "参考答案", reference.trim().isEmpty() ? "未提供" : compared[1], 0xff14683c);
   }
 
   private static void addCard(
-      MainActivity activity, LinearLayout body, String title, String text, int accent) {
+      MainActivity activity, LinearLayout body, String title, CharSequence text, int accent) {
     LinearLayout card = new LinearLayout(activity);
     card.setOrientation(LinearLayout.VERTICAL);
     card.setBackground(activity.bg(Color.WHITE));
@@ -47,7 +48,8 @@ final class PracticeAnswerViews {
     heading.setPadding(0, 0, 0, activity.dp(8));
     heading.setTypeface(null, android.graphics.Typeface.BOLD);
     card.addView(heading);
-    TextView content = activity.label(text, 16);
+    TextView content = activity.label("", 16);
+    content.setText(text);
     content.setPadding(0, 0, 0, 0);
     card.addView(content);
     body.addView(card, cardLayout(activity));

@@ -1324,6 +1324,7 @@ public class MainActivity extends Activity {
     CheckBox selectAll = new CheckBox(this);
     String type = q.optString("type");
     boolean longAnswer = PracticeAnswerViews.longAnswer(type);
+    boolean textComparison = longAnswer || type.equals("填空题");
     boolean showAnswers = (!exam && !answer(q).isEmpty()) || review;
     if (choice(q)) {
       JSONObject opts = q.optJSONObject("options");
@@ -1379,7 +1380,7 @@ public class MainActivity extends Activity {
           updateProgress();
         });
       }
-    } else if (!longAnswer || !showAnswers) {
+    } else if (!textComparison || !showAnswers) {
       EditText e = new EditText(this);
       if (longAnswer) PracticeAnswerViews.styleLongAnswerInput(this, e);
       else e.setHint(type.equals("填空题") ? "多个空用 | 分隔" : "输入答案；排序题填写原选项字母顺序");
@@ -1408,7 +1409,7 @@ public class MainActivity extends Activity {
       if (longAnswer) body.addView(e, body.indexOfChild(actions), PracticeAnswerViews.cardLayout(this));
       else front.addView(e);
     }
-    if (!review && !(longAnswer && showAnswers) && (!choice(q) || multiple(q))) {
+    if (!review && !(textComparison && showAnswers) && (!choice(q) || multiple(q))) {
       Button submit = button(exam ? "保存答案" : "提交答案", () -> submit(q));
       submit.setSingleLine(false);
       GradientDrawable surface = bg(0xffeaf0ff);
@@ -1427,7 +1428,7 @@ public class MainActivity extends Activity {
     }
     if (showAnswers) {
       String reference = displayedChoice(q, q.optString("answer"));
-      if (longAnswer) {
+      if (textComparison) {
         PracticeAnswerViews.addComparison(this, body, answer(q), reference);
       } else if (review) {
         body.addView(label("参考答案：" + reference, 16));
@@ -1582,16 +1583,15 @@ public class MainActivity extends Activity {
       examAnswers.put(id(q), draft);
       updateProgress();
     } else if (!answer(q).isEmpty()) return;
+    else if (PracticeAnswerViews.longAnswer(q.optString("type"))) record(q, null);
     else if (manual(q)) {
       LinearLayout content = settingsContent();
-      boolean longAnswer = PracticeAnswerViews.longAnswer(q.optString("type"));
-      if (longAnswer) PracticeAnswerViews.addComparison(this, content, draft, q.optString("answer"));
-      else content.addView(label(q.optString("answer"), 16));
+      content.addView(label(q.optString("answer"), 16));
       PracticeAnswerViews.addExplanation(this, content, q.optString("explanation"));
       ScrollView scroll = new ScrollView(this);
       scroll.addView(content);
       new AlertDialog.Builder(this)
-          .setTitle(longAnswer ? "对照答案并自评" : "参考答案")
+          .setTitle("参考答案")
           .setView(scroll)
           .setPositiveButton("我答对了", (d, w) -> record(q, true))
           .setNegativeButton("我答错了", (d, w) -> record(q, false))
@@ -1602,10 +1602,14 @@ public class MainActivity extends Activity {
   void updateProgress() {
     if (resultStats == null || !screen.equals("practice")) return;
     resultStats.removeAllViews();
-    int done = 0, right = 0;
+    int done = 0, right = 0, graded = 0;
     for (JSONObject x : questions) {
-      if (!answer(x).isEmpty()) done++;
-      if (exam ? review && x.optBoolean("examRight") : x.optBoolean(rightKey())) right++;
+      if (answer(x).isEmpty()) continue;
+      done++;
+      if (exam ? review : x.has(rightKey())) {
+        graded++;
+        if (x.optBoolean(exam ? "examRight" : rightKey())) right++;
+      }
     }
     boolean hidden = exam && !review;
     TextView yes = label("  " + (hidden ? "—" : right), 14);
@@ -1613,11 +1617,11 @@ public class MainActivity extends Activity {
     yes.setCompoundDrawablesWithIntrinsicBounds(new ResultIcon(true), null, null, null);
     yes.setTextColor(0xff16834a);
     yes.setContentDescription(hidden ? "交卷后显示答对数量" : "答对 " + right + " 题");
-    TextView no = label("  " + (hidden ? "—" : (done - right)), 14);
+    TextView no = label("  " + (hidden ? "—" : (graded - right)), 14);
     no.setPadding(dp(2), 0, dp(4), 0);
     no.setCompoundDrawablesWithIntrinsicBounds(new ResultIcon(false), null, null, null);
     no.setTextColor(0xffd33443);
-    no.setContentDescription(hidden ? "交卷后显示答错数量" : "答错 " + (done - right) + " 题");
+    no.setContentDescription(hidden ? "交卷后显示答错数量" : "答错 " + (graded - right) + " 题");
     resultStats.addView(yes);
     resultStats.addView(no);
     progressLabel = label("已做 " + done + "/" + questions.size(), 14);
@@ -1810,7 +1814,8 @@ public class MainActivity extends Activity {
     }
     heading.addView(button("关闭", () -> content.settle(false)));
     content.addView(heading);
-    content.addView(label(ungradedExam ? "蓝色已作答 · 灰色未答" : "绿色答对 · 红色答错 · 灰色未答", 13));
+    content.addView(label(ungradedExam ? "蓝色已作答 · 灰色未答"
+        : "绿 对 · 红 错 · 蓝 未判分 · 灰 未答", 13));
 
     GridView numbers = new GridView(this);
     content.numbers = numbers;
@@ -1828,12 +1833,13 @@ public class MainActivity extends Activity {
         TextView number = recycled instanceof TextView ? (TextView) recycled : new TextView(MainActivity.this);
         JSONObject q = questions.get(position);
         boolean answered = !answer(q).isEmpty();
+        boolean ungraded = ungradedExam || (!exam && !q.has(rightKey()));
         boolean correct = q.optBoolean(exam ? "examRight" : rightKey());
         int color = 0xffedf0f5;
         String status = "未答";
         if (answered) {
-          color = ungradedExam ? 0xffdbe5ff : correct ? 0xffc9f0db : 0xffffd7d7;
-          status = ungradedExam ? "已作答" : correct ? "答对" : "答错";
+          color = ungraded ? 0xffdbe5ff : correct ? 0xffc9f0db : 0xffffd7d7;
+          status = ungraded ? (ungradedExam ? "已作答" : "已作答，未判分") : correct ? "答对" : "答错";
         }
         GradientDrawable tile = bg(color);
         if (position == index) tile.setStroke(dp(2), 0xff315cdb);
@@ -2088,10 +2094,10 @@ public class MainActivity extends Activity {
     return letters.toString();
   }
 
-  void record(JSONObject q, boolean ok) {
+  void record(JSONObject q, Boolean ok) {
     put(q, responseKey(), draft);
     put(q, rightKey(), ok);
-    if (!ok) put(q, "wrong", q.optInt("wrong") + 1);
+    if (Boolean.FALSE.equals(ok)) put(q, "wrong", q.optInt("wrong") + 1);
     pendingAnswers.remove(id(q));
     saveWhenIdle();
     practice();
@@ -2100,8 +2106,7 @@ public class MainActivity extends Activity {
       return;
     }
     int revision = pageRevision;
-    if (ok && !PracticeAnswerViews.longAnswer(q.optString("type"))
-        && prefs.getBoolean("auto", false) && index + 1 < questions.size())
+    if (Boolean.TRUE.equals(ok) && prefs.getBoolean("auto", false) && index + 1 < questions.size())
       ui
           .postDelayed(
               () -> {

@@ -617,26 +617,38 @@ public class InteractionTest {
         ((ViewGroup) ((android.widget.ScrollView) page).getChildAt(0)).getChildAt(1);
     assertEquals(activity.dp(168), field.getMinHeight());
     assertTrue((field.getInputType() & android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE) != 0);
+    activity.prefs.edit().putBoolean("auto", true).apply();
     field.setText("第一段\n第二段");
     assertTrue(withText(page, "提交答案").performClick());
-    AlertDialog assessment = ShadowAlertDialog.getLatestAlertDialog();
-    View comparison = assessment.getWindow().getDecorView();
-    assertNotNull(withText(comparison, "解析"));
-    assertNotNull(withText(comparison, "你的答案"));
-    assertNotNull(withText(comparison, "第一段\n第二段"));
-    assertNotNull(withText(comparison, "参考内容"));
-    activity.prefs.edit().putBoolean("auto", true).apply();
-    assessment.getButton(AlertDialog.BUTTON_POSITIVE).performClick();
-    shadowOf(Looper.getMainLooper()).idle();
-
+    assertNull(ShadowAlertDialog.getLatestAlertDialog());
     assertEquals("第一段\n第二段", q.getString("response"));
+    assertFalse(q.has("right"));
+    assertEquals(0, q.optInt("wrong"));
+    assertEquals("已做 1/4", activity.progressLabel.getText().toString());
     page = activity.practicePages.get(0).view;
+    assertNotNull(withText(page, "你的答案"));
+    assertNotNull(withText(page, "第一段\n第二段"));
+    assertNotNull(withText(page, "参考内容"));
     View heading = withText(page, "解析");
     View explanation = withText(page, "第一点\n第二点");
     assertSame(heading.getParent(), explanation.getParent());
     assertNotNull(((View) heading.getParent()).getBackground());
     settle();
     assertEquals(0, activity.index);
+  }
+
+  @Test
+  public void answerComparisonHighlightsOnlyChangedCharactersOnBothSides() {
+    CharSequence[] compared = AnswerDifferences.highlight("电流 MA\n电压 36 V", "电流 mA\n电压 36V");
+    for (int i = 0; i < compared.length; i++) {
+      android.text.Spanned text = (android.text.Spanned) compared[i];
+      android.text.style.ForegroundColorSpan[] spans = text.getSpans(
+          0, text.length(), android.text.style.ForegroundColorSpan.class);
+      assertEquals(1, spans.length);
+      assertEquals(0xffb42332, spans[0].getForegroundColor());
+      assertEquals(i == 0 ? "M" : "m", text.subSequence(
+          text.getSpanStart(spans[0]), text.getSpanEnd(spans[0])).toString());
+    }
   }
 
   @Test
