@@ -11,6 +11,7 @@ import org.json.*;
 final class ExamFlow {
   private final MainActivity activity;
   private Map<String, BigDecimal> points = new HashMap<>();
+  private boolean grading;
 
   ExamFlow(MainActivity activity) {
     this.activity = activity;
@@ -171,6 +172,8 @@ final class ExamFlow {
                       activity.orders.clear();
                       activity.exam = true;
                       activity.review = false;
+                      activity.mistakePractice = false;
+                      grading = false;
                       activity.index = 0;
                       d.dismiss();
                       activity.practice();
@@ -223,6 +226,8 @@ final class ExamFlow {
   }
 
   void finish() {
+    if (!activity.exam || activity.review || grading) return;
+    grading = true;
     gradeNext(0);
   }
 
@@ -251,12 +256,19 @@ final class ExamFlow {
       gradeOne(q, !answer.isEmpty() && activity.correct(q, answer));
     }
     BigDecimal score = BigDecimal.ZERO, total = BigDecimal.ZERO;
+    int right = 0, answered = 0;
     for (JSONObject q : activity.questions) {
       BigDecimal point = points.get(activity.id(q));
       total = total.add(point);
-      if (q.optBoolean("examRight")) score = score.add(point);
+      if (!activity.answer(q).trim().isEmpty()) answered++;
+      if (q.optBoolean("examRight")) {
+        score = score.add(point);
+        right++;
+      }
     }
+    ExamHistory.add(activity, scoreText(score), scoreText(total), activity.questions.size(), answered, right);
     activity.review = true;
+    grading = false;
     activity.index = 0;
     activity.save();
     activity.practice();
@@ -267,6 +279,10 @@ final class ExamFlow {
     result.setBackground(activity.bg(0xffeaf0ff));
     box.addView(result, new LinearLayout.LayoutParams(-1, -2));
     activity.settingsDialog("考试成绩", box, "查看试卷", null).show();
+  }
+
+  void showHistory() {
+    ExamHistory.show(activity);
   }
 
   void gradeOne(JSONObject q, boolean ok) {

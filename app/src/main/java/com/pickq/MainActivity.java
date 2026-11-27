@@ -75,10 +75,12 @@ public class MainActivity extends Activity {
   }
 
   String responseKey() {
+    if (mistakePractice) return "mistakeResponse";
     return randomPractice ? "randomResponse" : "response";
   }
 
   String rightKey() {
+    if (mistakePractice) return "mistakeRight";
     return randomPractice ? "randomRight" : "right";
   }
 
@@ -1056,11 +1058,13 @@ public class MainActivity extends Activity {
     card("顺序练习", "继续上次进度 · 即时解析", () -> startPractice(false));
     card("随机练习", "随机题序 · 继续上次进度", () -> startPractice(true));
     card("模拟考试", "按题型抽题 · 交卷后查看答案", examFlow::setup);
+    card("考试记录", "查看历次模拟考试成绩", examFlow::showHistory);
     card("错题集", "查看累计错题与错误次数", () -> wrongPage());
     card("斩题库", cutQuestions.count(bank.optJSONArray("questions")) + " 题 · 可随时恢复", cutQuestions::show);
   }
 
   boolean randomPractice;
+  boolean mistakePractice;
   String practicePositionKey;
 
   void loadPracticeQuestions() {
@@ -1070,6 +1074,7 @@ public class MainActivity extends Activity {
   }
 
   void startPractice(boolean random) {
+    mistakePractice = false;
     randomPractice = random;
     loadPracticeQuestions();
     exam = false;
@@ -1146,6 +1151,48 @@ public class MainActivity extends Activity {
     startPractice(false);
   }
 
+  void startMistakePractice(List<JSONObject> mistakes) {
+    List<JSONObject> available = new ArrayList<>(mistakes);
+    available.removeIf(CutQuestions::contains);
+    if (available.isEmpty()) {
+      toast("暂无可练习的错题");
+      return;
+    }
+    questions.clear();
+    questions.addAll(available);
+    exam = false;
+    review = false;
+    randomPractice = false;
+    mistakePractice = true;
+    practicePositionKey = null;
+    pendingAnswers.clear();
+    orders.clear();
+    index = 0;
+    for (int i = 0; i < questions.size(); i++) {
+      if (answer(questions.get(i)).isEmpty()) {
+        index = i;
+        break;
+      }
+    }
+    practice();
+  }
+
+  void restartMistakePractice() {
+    List<Object> answers = new ArrayList<>(), results = new ArrayList<>();
+    for (JSONObject question : questions) {
+      answers.add(question.remove(responseKey()));
+      results.add(question.remove(rightKey()));
+    }
+    if (!save()) {
+      for (int i = 0; i < questions.size(); i++) {
+        put(questions.get(i), responseKey(), answers.get(i));
+        put(questions.get(i), rightKey(), results.get(i));
+      }
+      return;
+    }
+    startMistakePractice(questions);
+  }
+
   void wrongPage() {
     screen = "wrong";
     shell("错题集");
@@ -1159,6 +1206,8 @@ public class MainActivity extends Activity {
       if (q.optInt("wrong") > 0) mistakes.add(q);
     }
     mistakes.sort(Comparator.comparingInt((JSONObject q) -> q.optInt("wrong")).reversed());
+    if (mistakes.stream().anyMatch(q -> !CutQuestions.contains(q)))
+      bar.addView(button("练习错题", () -> startMistakePractice(mistakes)));
     if (mistakes.isEmpty()) body.addView(label("暂无错题", 15));
     for (JSONObject q : mistakes) {
       LinearLayout row = new LinearLayout(this);
@@ -1245,7 +1294,7 @@ public class MainActivity extends Activity {
     if (!reuse) {
       shell("");
       Button back = button("‹", this::onBackPressed);
-      back.setContentDescription("返回题库");
+      back.setContentDescription(mistakePractice && !exam ? "返回错题集" : "返回题库");
       bar.addView(back, 0);
       if (!exam) bar.addView(button("斩题", this::cutCurrentQuestion));
       bar.addView(button("⋮", () -> practiceMenu()));
@@ -1428,7 +1477,7 @@ public class MainActivity extends Activity {
       if (longAnswer) body.addView(e, body.indexOfChild(actions), PracticeAnswerViews.cardLayout(this));
       else front.addView(e);
     }
-    if (!review && !(textComparison && showAnswers) && (!choice(q) || multiple(q))) {
+    if (!review && !(textComparison && showAnswers) && (!choice(q) || (!exam && multiple(q)))) {
       Button submit = button(exam ? "保存答案" : "提交答案", () -> submit(q));
       submit.setSingleLine(false);
       GradientDrawable surface = bg(0xffeaf0ff);
@@ -1558,8 +1607,11 @@ public class MainActivity extends Activity {
     pendingAnswers.remove(id(question));
     questions.remove(index);
     if (questions.isEmpty()) {
-      prefs.edit().putInt(practicePositionKey, 0).remove(practicePositionKey + ":question").apply();
-      bankPage();
+      if (mistakePractice) wrongPage();
+      else {
+        prefs.edit().putInt(practicePositionKey, 0).remove(practicePositionKey + ":question").apply();
+        bankPage();
+      }
     } else {
       index = Math.min(index, questions.size() - 1);
       savePracticePosition();
@@ -2277,10 +2329,14 @@ public class MainActivity extends Activity {
       settingsAction(
           box, d, "清空重练", true,
           () -> new AlertDialog.Builder(this)
-              .setTitle("清空顺序练习")
-              .setMessage("清空本题库的顺序练习作答记录，并从第 1 题开始？")
+              .setTitle(mistakePractice ? "清空错题练习" : "清空顺序练习")
+              .setMessage(mistakePractice ? "清空本轮错题练习的作答，并从第 1 题开始？"
+                  : "清空本题库的顺序练习作答记录，并从第 1 题开始？")
               .setNegativeButton("取消", null)
-              .setPositiveButton("清空并重练", (dialog, which) -> restartSequentialPractice())
+              .setPositiveButton("清空并重练", (dialog, which) -> {
+                if (mistakePractice) restartMistakePractice();
+                else restartSequentialPractice();
+              })
               .show());
     }
     d.show();
@@ -2341,6 +2397,8 @@ public class MainActivity extends Activity {
                       q.remove("right");
                       q.remove("randomResponse");
                       q.remove("randomRight");
+                      q.remove("mistakeResponse");
+                      q.remove("mistakeRight");
                       orders.clear();
                       save();
                       d.dismiss();
@@ -2634,6 +2692,7 @@ public class MainActivity extends Activity {
           .setPositiveButton("退出", (d, w) -> bankPage())
           .setNegativeButton("继续考试", null)
           .show();
+    else if (mistakePractice && !exam && screen.equals("practice")) wrongPage();
     else bankPage();
   }
 }

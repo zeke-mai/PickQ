@@ -744,10 +744,42 @@ public class InteractionTest {
     setup.getButton(AlertDialog.BUTTON_POSITIVE).performClick();
     assertTrue(activity.exam);
     assertEquals(3, activity.questions.size());
-    for (JSONObject q : activity.questions) activity.examAnswers.put(activity.id(q), "AB");
+    for (int i = 0; i < activity.questions.size(); i++) {
+      activity.index = i;
+      activity.practice();
+      View page = activity.practicePages.get(i).view;
+      assertNull(withText(page, "保存答案"));
+      assertTrue(withText(page, "全选").performClick());
+      assertEquals("AB", activity.answer(activity.questions.get(i)));
+    }
     activity.examFlow.finish();
     AlertDialog result = ShadowAlertDialog.getLatestAlertDialog();
     assertNotNull(withText(result.getWindow().getDecorView(), "100 / 100 分"));
+    activity.examFlow.finish();
+    assertEquals(1, activity.bank.optJSONArray("examHistory").length());
+    result.dismiss();
+    activity.examFlow.showHistory();
+    assertNotNull(withText(activity.body, "100 / 100 分"));
+    assertTrue(withText(activity.body, "100 / 100 分").getParent() instanceof ViewGroup);
+  }
+
+  @Test
+  public void mistakePracticeIncludesOnlyActiveMistakesAndKeepsSequentialAnswers() throws Exception {
+    JSONArray entries = activity.bank.getJSONArray("questions");
+    JSONObject active = entries.getJSONObject(0).put("wrong", 2).put("response", "A");
+    entries.getJSONObject(1).put("wrong", 8).put("cut", true);
+    activity.wrongPage();
+    assertTrue(withText(activity.bar, "练习错题").performClick());
+    assertEquals(1, activity.questions.size());
+    assertSame(active, activity.questions.get(0));
+    assertEquals("", activity.answer(active));
+    activity.draft = "AB";
+    activity.submit(active);
+    assertEquals("AB", active.getString("mistakeResponse"));
+    assertEquals("A", active.getString("response"));
+    ShadowAlertDialog.getLatestAlertDialog().dismiss();
+    activity.onBackPressed();
+    assertEquals("wrong", activity.screen);
   }
 
   @Test
