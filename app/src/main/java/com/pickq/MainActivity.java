@@ -2392,14 +2392,9 @@ public class MainActivity extends Activity {
                         } else put(q, e.getKey(), val);
                       }
                       put(q, "options", opts);
-                      pendingAnswers.remove(id(q));
-                      q.remove("response");
-                      q.remove("right");
-                      q.remove("randomResponse");
-                      q.remove("randomRight");
-                      q.remove("mistakeResponse");
-                      q.remove("mistakeRight");
-                      orders.clear();
+                      List<String> order = orders.get(id(q));
+                      if (order != null && (order.size() != opts.length()
+                          || order.stream().anyMatch(key -> !opts.has(key)))) orders.remove(id(q));
                       save();
                       d.dismiss();
                       practice();

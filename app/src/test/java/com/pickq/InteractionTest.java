@@ -783,6 +783,42 @@ public class InteractionTest {
   }
 
   @Test
+  public void editingAQuestionKeepsSubmittedAnswersAndInProgressSelections() throws Exception {
+    JSONArray entries = activity.bank.getJSONArray("questions");
+    JSONObject submitted = entries.getJSONObject(0);
+    submitted.put("response", "AB").put("right", true)
+        .put("randomResponse", "A").put("randomRight", false)
+        .put("mistakeResponse", "B").put("mistakeRight", false).put("wrong", 2);
+    activity.startPractice(false);
+    activity.edit();
+    AlertDialog editor = ShadowAlertDialog.getLatestAlertDialog();
+    android.widget.EditText title = (android.widget.EditText)
+        withText(editor.getWindow().getDecorView(), submitted.getString("title"));
+    title.setText("修改后的题目");
+    shadowOf(Looper.getMainLooper()).idle();
+    editor.getButton(AlertDialog.BUTTON_POSITIVE).performClick();
+    assertEquals("修改后的题目", submitted.getString("title"));
+    assertEquals("AB", activity.answer(submitted));
+    assertTrue(submitted.getBoolean("right"));
+    assertEquals("A", submitted.getString("randomResponse"));
+    assertFalse(submitted.getBoolean("randomRight"));
+    assertEquals("B", submitted.getString("mistakeResponse"));
+    assertFalse(submitted.getBoolean("mistakeRight"));
+    assertEquals(2, submitted.getInt("wrong"));
+
+    activity.index = 1;
+    activity.practice();
+    View option = activity.practicePages.get(1).view.findViewWithTag("A");
+    assertTrue(option.performClick());
+    activity.edit();
+    editor = ShadowAlertDialog.getLatestAlertDialog();
+    shadowOf(Looper.getMainLooper()).idle();
+    editor.getButton(AlertDialog.BUTTON_POSITIVE).performClick();
+    assertEquals("A", activity.draft);
+    assertTrue(activity.practicePages.get(1).view.findViewWithTag("A").isSelected());
+  }
+
+  @Test
   public void correctAnswerStartsAutomaticTurnWithin120Milliseconds() {
     activity.prefs.edit().putBoolean("auto", true).commit();
     activity.startPractice(false);
